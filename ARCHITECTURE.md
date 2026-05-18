@@ -21,7 +21,7 @@
 ## Technology Stack
 
 ### 3D Rendering
-- **Three.js** — primary 3D engine (WebGL), full control over rendering, well-documented, widely used in academic visualization prototypes. Used for Space-Time Cube, point clouds, DEM surface mesh.
+- **Three.js** — primary 3D engine (WebGL), full control over rendering, well-documented, widely used in academic visualization prototypes. Used for Space-Time Cube, point clouds, DEM (Digital elevation model) surface mesh.
 - **deck.gl** *(optional)* — GPU-accelerated geospatial layer on top of Three.js; useful if switching to a map-based overview with `ScatterplotLayer` or `TripsLayer`.
 
 ### 2D Linked Views & Data
