@@ -15,7 +15,7 @@ Expected raw files (data/raw/)
 ------------------------------
     detections_jittered.csv   — seismic events  (required)
     meteo.csv                 — meteorological  (optional)
-    runoff.csv                — water runoff     (optional)
+    runoff.csv                — water runoff    (optional)
     stations.csv              — sensor locations (optional)
 
 Output
