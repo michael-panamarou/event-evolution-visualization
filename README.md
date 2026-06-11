@@ -139,3 +139,43 @@ Each event in `EV`:
 - [ ] Temporal density heatmap
 - [ ] Multi-dataset support
 - [ ] Export selected region as CSV
+
+# 🎓 Bachelor's Thesis Plan
+
+## 📖 June 11–15 — Writing Foundations
+
+* [ ] **Chapter 2 — Theoretical Background**
+* [ ] **Chapter 3 — Related Work**
+
+---
+
+## 🛠️ June 16–23 — Design, Implementation & Evaluation
+
+* [ ] **Chapter 4 — Concept & Design**
+* [ ] **Chapter 5 — Implementation**
+* [ ] **Chapter 6 — Evaluation**
+
+---
+
+## ✅ June 24–25 — Final Chapters
+
+* [ ] **Chapter 7**
+* [ ] **Chapter 8**
+
+---
+
+## 📅 Timeline Overview
+
+| Period         | Chapters    |
+| -------------- | ----------- |
+| **June 11–15** | Chapter 2–3 |
+| **June 16–23** | Chapter 4–6 |
+| **June 24–25** | Chapter 7–8 |
+
+---
+
+### 🎯 Objective
+
+Complete and finalize the bachelor's thesis by **25 June**.
+
+
