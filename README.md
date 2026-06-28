@@ -131,11 +131,3 @@ Each event in `EV`:
 | Local: quality distribution | 🌻|
 | Meteo correlation strip | 🌻 |
 | Data conversion script | 🌻 |
-
-## Next steps
-
-- [ ] Load full 37 356 event dataset
-- [ ] Add DEM glacier surface mesh
-- [ ] Temporal density heatmap
-- [ ] Multi-dataset support
-- [ ] Export selected region as CSV
