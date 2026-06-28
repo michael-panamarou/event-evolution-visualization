@@ -633,6 +633,10 @@ function renderLoop() {
 }
 
 function init() {
+/*  const days = Math.round((META.t_max - META.t_min) / 86400);
+  document.getElementById('s-loaded').textContent = META.count.toLocaleString();
+  document.getElementById('s-days').textContent   = days + ' days';*/
+
   onResize();
   rebuildPointCloud();
   renderLoop();
