@@ -348,6 +348,59 @@ def generate_lorenz(n_steps=22000):
     return {"meta": meta, "events": events, "meteo": []}
 
 
+def generate_traffic(n_events=9000, seed=42):
+    """Synthetic UK road-accident data with rush-hour temporal patterns."""
+    print(f"  Generating {n_events} synthetic traffic incidents ...", end=" ", flush=True)
+    rng = np.random.default_rng(seed)
+
+    roads = [
+        (np.array([-40000,-28000]), np.array([42000, 30000]), 0.30),
+        (np.array([  3000,-36000]), np.array([ 3000, 36000]), 0.25),
+        (np.array([-44000,  1000]), np.array([44000,  1000]), 0.22),
+        (np.array([-22000,-22000]), np.array([22000, 22000]), 0.13),
+        (np.array([-16000, 12000]), np.array([26000,-14000]), 0.10),
+    ]
+    weights = np.array([r[2] for r in roads]); weights /= weights.sum()
+    t_start = 1640995200   # 2022-01-01 00:00 UTC
+    events = []
+
+    for _ in range(n_events):
+        ri = rng.choice(len(roads), p=weights)
+        s, e = roads[ri][0], roads[ri][1]
+        direction = e - s
+        norm_len = float(np.linalg.norm(direction)) or 1.0
+        perp = np.array([-direction[1], direction[0]]) / norm_len
+        pos = s + rng.uniform(0, 1)*direction + perp*rng.normal(0, 400)
+
+        day = int(rng.integers(0, 365))
+        is_wknd = (day % 7) >= 5
+        hr_draw = float(rng.uniform())
+        if   is_wknd:         hour = float(rng.normal(12.5, 3.5))
+        elif hr_draw < 0.25:  hour = float(rng.normal(8.0,  0.9))
+        elif hr_draw < 0.55:  hour = float(rng.normal(17.5, 1.1))
+        elif hr_draw < 0.80:  hour = float(rng.uniform(10, 16))
+        else:                 hour = float(rng.uniform(0, 6))
+        hour = max(0.0, min(23.99, hour))
+        ts = t_start + day*86400 + int(hour*3600)
+        sev = int(rng.choice([1, 2, 3], p=[0.04, 0.22, 0.74]))
+        events.append({"t": float(ts), "x": round(float(pos[0]), 1),
+                       "y": round(float(pos[1]), 1), "z": 0.0,
+                       "q": round((4 - sev) / 3.0, 4)})
+
+    events.sort(key=lambda ev: ev["t"])
+    print(f"{len(events)} events")
+
+    xs = [e["x"] for e in events]; ys = [e["y"] for e in events]
+    meta = {
+        "name": "UK Road Traffic Incidents (Synthetic)", "domain": "traffic",
+        "axes": {"x": "Longitude (proj.)", "y": "Latitude (proj.)", "z": "(flat)"},
+        "q_label": "Severity (inverse)", "date_range": "Jan – Dec 2022", "has_meteo": False,
+        "count": len(events), "t_min": events[0]["t"], "t_max": events[-1]["t"],
+        "x_range": [min(xs), max(xs)], "y_range": [min(ys), max(ys)], "z_range": [0.0, 0.0],
+    }
+    return {"meta": meta, "events": events, "meteo": []}
+
+
 # Main
 
 def main():
