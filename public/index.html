@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Icequake Viz — Rhône Glacier 2020</title>
+  <title>Event Evolution Visualization</title>
 
   <!-- Bootstrap 5 -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
@@ -11,224 +11,271 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet"/>
   <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-
   <link rel="stylesheet" href="style.css"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
 </head>
 <body>
 
-  <!-- Navbar Header -->
-  <nav class="navbar navbar-expand-lg app-navbar px-3 py-0">
-    <div class="d-flex align-items-center gap-2">
-      <i class="bi bi-hexagon-fill text-primary fs-5"></i>
-      <div>
-        <div class="fw-semibold lh-1" style="font-size:14px;">Icequake Visualization</div>
-        <div class="text-muted" style="font-size:11px;">Rhône Glacier · Jul – Aug 2020</div>
+<!-- Navbar -->
+<nav class="navbar app-navbar px-3 py-0">
+  <div class="d-flex align-items-center gap-2">
+    <i class="bi bi-hexagon-fill text-primary fs-5"></i>
+    <div>
+      <div class="fw-semibold lh-1" style="font-size:14px;">Event Evolution Visualization</div>
+      <div class="text-muted" id="ds-name" style="font-size:11px;">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Dataset switcher -->
+  <div class="d-flex align-items-center gap-2 ms-4">
+    <span class="text-muted" style="font-size:11px;">Dataset:</span>
+    <div class="btn-group btn-group-sm">
+      <button class="btn btn-outline-secondary ds-btn active" data-ds="icequakes"
+              onclick="loadDataset('icequakes')">
+        <i class="bi bi-snow me-1"></i>Icequakes
+      </button>
+      <button class="btn btn-outline-secondary ds-btn" data-ds="traffic"
+              onclick="loadDataset('traffic')">
+        <i class="bi bi-car-front me-1"></i>Traffic
+      </button>
+      <button class="btn btn-outline-secondary ds-btn" data-ds="lorenz"
+              onclick="loadDataset('lorenz')">
+        <i class="bi bi-infinity me-1"></i>Lorenz
+      </button>
+    </div>
+  </div>
+
+  <div class="d-flex align-items-center gap-4 ms-auto">
+    <div class="stat-pill">
+      <span class="stat-val" id="s-shown">—</span>
+      <span class="stat-lbl">visible</span>
+    </div>
+    <div class="stat-pill">
+      <span class="stat-val" id="ds-count">—</span>
+      <span class="stat-lbl">total</span>
+    </div>
+    <div class="stat-pill">
+      <span class="stat-val" id="ds-domain">—</span>
+      <span class="stat-lbl">domain</span>
+    </div>
+    <span id="mode-badge" class="badge bg-secondary-subtle text-secondary border">OVERVIEW</span>
+  </div>
+</nav>
+
+<!-- Main Layout -->
+<div id="app-layout">
+
+  <!-- Left Sidebar -->
+  <aside id="sidebar" class="app-sidebar">
+
+    <!-- View mode -->
+    <div class="sidebar-section">
+      <div class="section-label">Visualization</div>
+      <div class="d-grid gap-1">
+        <button id="vm-pc" class="btn btn-sm btn-primary text-start"
+                onclick="setViewMode('pointcloud')">
+          <i class="bi bi-grid-3x3-gap me-1"></i>Point cloud
+          <small class="d-block mt-0" style="font-size:9px;opacity:0.65;">Overview 1 · spatial distribution</small>
+        </button>
+        <button id="vm-hm" class="btn btn-sm btn-outline-secondary text-start"
+                onclick="setViewMode('heatmap')">
+          <i class="bi bi-layers me-1"></i>Density heatmap
+          <small class="d-block mt-0" style="font-size:9px;opacity:0.65;">Overview 2 · temporal activity</small>
+        </button>
+      </div>
+      <div id="heatmap-note" class="mt-2 p-2 rounded"
+           style="display:none;background:#fef9e7;border:1px solid #fcd34d;font-size:10px;color:#92400e;">
+        <i class="bi bi-info-circle me-1"></i>Vertical axis = time. Each layer = one time slice.
       </div>
     </div>
 
-    <div class="d-flex align-items-center gap-4 ms-auto">
-      <div class="stat-pill">
-        <span class="stat-val" id="s-shown">—</span>
-        <span class="stat-lbl">visible</span>
+    <!-- Color by -->
+    <div class="sidebar-section">
+      <div class="section-label">Color by</div>
+      <div class="btn-group w-100" role="group">
+        <button id="cb-time"  class="btn btn-sm btn-outline-primary active" onclick="setColor('time')">Time</button>
+        <button id="cb-depth" class="btn btn-sm btn-outline-primary"        onclick="setColor('depth')">Z axis</button>
+        <button id="cb-qual"  class="btn btn-sm btn-outline-primary"        onclick="setColor('qual')">Quality</button>
       </div>
-      <div class="stat-pill">
-        <span class="stat-val" id="s-loaded">—</span>
-        <span class="stat-lbl">loaded</span>
+      <div class="color-legend mt-2">
+        <div class="legend-bar" id="legend-bar"></div>
+        <div class="d-flex justify-content-between mt-1" style="font-size:10px;color:#888;">
+          <span id="leg-min">Early</span><span id="leg-max">Late</span>
+        </div>
       </div>
-      <div class="stat-pill">
-        <span class="stat-val" id="s-days">—</span>
-        <span class="stat-lbl">days</span>
-      </div>
-      <span id="mode-badge" class="badge bg-secondary-subtle text-secondary border">OVERVIEW</span>
     </div>
-  </nav>
 
-  <!-- Main Layout -->
-  <div id="app-layout">
-
-    <!-- Left Sidebar -->
-    <aside id="sidebar" class="app-sidebar">
-
-      <!-- Color by -->
-      <div class="sidebar-section">
-        <div class="section-label">Color by</div>
-        <div class="btn-group w-100" role="group">
-          <button id="cb-time"  class="btn btn-sm btn-outline-primary active" onclick="setColor('time')">Time</button>
-          <button id="cb-depth" class="btn btn-sm btn-outline-primary"        onclick="setColor('depth')">Depth</button>
-          <button id="cb-qual"  class="btn btn-sm btn-outline-primary"        onclick="setColor('qual')">Quality</button>
-        </div>
-        <div class="color-legend mt-2">
-          <div class="legend-bar" id="legend-bar"></div>
-          <div class="d-flex justify-content-between mt-1" style="font-size:10px;color:#888;">
-            <span id="leg-min">Jul 2</span><span id="leg-max">Aug 26</span>
-          </div>
-        </div>
+    <!-- Point size -->
+    <div class="sidebar-section">
+      <div class="section-label d-flex justify-content-between">
+        Point size <span class="text-primary mono" id="sz-val">2.0</span>
       </div>
-
-      <!-- Point size -->
-      <div class="sidebar-section">
-        <div class="section-label d-flex justify-content-between">
-          Point size <span class="text-primary mono" id="sz-val">2.0</span>
-        </div>
+      <label>
         <input type="range" class="form-range" min="0.5" max="6" step="0.5" value="2"
-          oninput="setSize(this.value)"/>
-      </div>
+               oninput="setSize(this.value)"/>
+      </label>
+    </div>
 
-      <!-- Quality filter -->
-      <div class="sidebar-section">
-        <div class="section-label d-flex justify-content-between">
-          Min quality <span class="text-primary mono" id="q-val">0.05</span>
-        </div>
-        <input type="range" class="form-range" min="0.05" max="0.6" step="0.01" value="0.05"
-          oninput="setQual(this.value)"/>
+    <!-- Quality filter -->
+    <div class="sidebar-section">
+      <div class="section-label d-flex justify-content-between">
+        Min quality <span class="text-primary mono" id="q-val">0.05</span>
       </div>
+      <label>
+        <input type="range" class="form-range" min="0.05" max="0.9" step="0.01" value="0.05"
+               oninput="setQual(this.value)"/>
+      </label>
+    </div>
 
-      <!-- Camera -->
-      <div class="sidebar-section">
-        <div class="section-label">Camera</div>
-        <div class="d-grid gap-1">
-          <button class="btn btn-sm btn-outline-secondary text-start" onclick="resetCam()">
-            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset view
-          </button>
-          <button class="btn btn-sm btn-outline-secondary text-start" id="rot-btn" onclick="toggleRot()">
-            <i class="bi bi-arrow-repeat me-1"></i>Auto-rotate
-          </button>
-        </div>
+    <!-- Camera -->
+    <div class="sidebar-section">
+      <div class="section-label">Camera</div>
+      <div class="d-grid gap-1">
+        <button class="btn btn-sm btn-outline-secondary text-start" onclick="resetCam()">
+          <i class="bi bi-arrow-counterclockwise me-1"></i>Reset view
+        </button>
+        <button class="btn btn-sm btn-outline-secondary text-start" id="rot-btn" onclick="toggleRot()">
+          <i class="bi bi-arrow-repeat me-1"></i>Auto-rotate
+        </button>
       </div>
+    </div>
 
-      <!-- Interaction mode -->
-      <div class="sidebar-section">
-        <div class="section-label">Interaction mode</div>
-        <div class="d-grid gap-1">
-          <button id="m-orbit" class="btn btn-sm btn-primary text-start" onclick="setMode('orbit')">
-            <i class="bi bi-arrows-move me-1"></i>Orbit
-          </button>
-          <button id="m-sel" class="btn btn-sm btn-outline-warning text-start" onclick="setMode('select')">
-            <i class="bi bi-bounding-box me-1"></i>Select region
-          </button>
-        </div>
+    <!-- Interaction mode -->
+    <div class="sidebar-section">
+      <div class="section-label">Interaction</div>
+      <div class="d-grid gap-1">
+        <button id="m-orbit" class="btn btn-sm btn-primary text-start" onclick="setMode('orbit')">
+          <i class="bi bi-arrows-move me-1"></i>Orbit
+        </button>
+        <button id="m-sel" class="btn btn-sm btn-outline-warning text-start" onclick="setMode('select')">
+          <i class="bi bi-bounding-box me-1"></i>Select region
+        </button>
       </div>
+    </div>
 
-      <!-- Dataset info -->
+    <!-- Dataset info -->
+    <div class="sidebar-section">
+      <div class="section-label">Dataset info</div>
+      <table class="info-table w-100">
+        <tr><td>Period</td><td id="ds-range">—</td></tr>
+      </table>
+    </div>
+
+  </aside>
+
+  <!-- 3D viewport -->
+  <div id="view3d">
+    <canvas id="c"></canvas>
+    <div id="selbox"></div>
+
+    <div class="axis-hint">
+      <span id="axis-hint-label" class="text-muted"
+            style="font-size:10px;font-family:monospace;"></span>
+    </div>
+
+    <div id="hud-orbit" class="viewport-hint">
+      <i class="bi bi-mouse"></i> drag to rotate &nbsp;·&nbsp; scroll to zoom
+      &nbsp;·&nbsp; <kbd>Space</kbd> play &nbsp;·&nbsp; <kbd>R</kbd> reset
+    </div>
+    <div id="hud-sel" class="viewport-hint text-warning" style="display:none;">
+      <i class="bi bi-bounding-box"></i> drag to draw selection
+      &nbsp;·&nbsp; <kbd>Esc</kbd> clear
+    </div>
+  </div>
+
+  <!-- Right – local exploration -->
+  <aside id="local" class="app-sidebar">
+
+    <div class="local-header">
+      <span class="fw-semibold" style="font-size:13px;">Local Exploration</span>
+      <span class="text-muted" style="font-size:11px;">Event Trail</span>
+    </div>
+
+    <div id="local-empty" class="local-empty">
+      <i class="bi bi-bounding-box fs-1 text-muted opacity-25"></i>
+      <div class="text-muted mt-2 text-center" style="font-size:12px;line-height:1.7;">
+        Switch to <strong class="text-body">Select region</strong> mode<br>
+        and draw a box on the 3D view.<br><br>
+        The selected events will be<br>connected as a temporal trail.<br>
+        <span class="badge bg-success" style="font-size:9px;">● first</span>&nbsp;
+        <span class="badge bg-danger"  style="font-size:9px;">● last</span>
+      </div>
+    </div>
+
+    <div id="local-content" style="display:none;flex-direction:column;flex:1;overflow-y:auto;">
+
       <div class="sidebar-section">
-        <div class="section-label">Dataset</div>
+        <div class="section-label">Selection stats</div>
         <table class="info-table w-100">
-          <tr><td>Location</td><td>Rhône Glacier, CH</td></tr>
-          <tr><td>Coords</td><td>46.60°N 8.38°E</td></tr>
-          <tr><td>Depth</td><td>−2191 to −2608 m</td></tr>
-          <tr><td>Semblance</td><td>0.05 – 0.78</td></tr>
+          <tr><td>Events</td>    <td id="l-count">—</td></tr>
+          <tr><td>Time span</td> <td id="l-tspan">—</td></tr>
+          <tr id="l-depth-row"><td id="l-depth-label">Z range</td><td id="l-depth">—</td></tr>
+          <tr><td id="l-q-label">Quality</td><td id="l-qual">—</td></tr>
         </table>
       </div>
 
-    </aside>
-
-    <!-- 3D viewport -->
-    <div id="view3d">
-      <canvas id="c"></canvas>
-      <div id="selbox"></div>
-
-      <!-- axis hint -->
-      <div class="axis-hint">
-        <span class="ax-x">X</span> East &nbsp;
-        <span class="ax-z">Z</span> North &nbsp;
-        <span class="ax-y">Y</span> Depth
+      <div class="sidebar-section">
+        <div class="section-label">Events over time</div>
+        <canvas id="local-time-chart" class="chart-canvas" height="68"></canvas>
       </div>
 
-      <div id="hud-orbit" class="viewport-hint">
-        <i class="bi bi-mouse"></i> drag to rotate &nbsp;·&nbsp; scroll to zoom
+      <div class="sidebar-section">
+        <div class="section-label">Z-axis distribution</div>
+        <canvas id="depth-chart" class="chart-canvas" height="60"></canvas>
       </div>
-      <div id="hud-sel" class="viewport-hint text-warning" style="display:none;">
-        <i class="bi bi-bounding-box"></i> drag to draw selection
+
+      <div class="sidebar-section">
+        <div class="section-label">Quality distribution</div>
+        <canvas id="qual-chart" class="chart-canvas" height="52"></canvas>
       </div>
+
+      <div class="px-3 pb-3 mt-auto">
+        <button class="btn btn-sm btn-outline-danger w-100" onclick="clearSelection()">
+          <i class="bi bi-x-circle me-1"></i>Clear selection
+        </button>
+      </div>
+
     </div>
+  </aside>
 
-    <!-- Right - local exploration -->
-    <aside id="local" class="app-sidebar">
+</div><!-- /#app-layout -->
 
-      <div class="local-header">
-        <span class="fw-semibold" style="font-size:13px;">Local Exploration</span>
-        <span class="text-muted" id="local-hint" style="font-size:11px;">select region →</span>
-      </div>
-
-      <!-- empty state -->
-      <div id="local-empty" class="local-empty">
-        <i class="bi bi-bounding-box fs-1 text-muted opacity-25"></i>
-        <div class="text-muted mt-2 text-center" style="font-size:12px;line-height:1.7;">
-          Switch to <strong class="text-body">Select region</strong> mode<br>
-          and draw a box on the 3D view<br>to explore a local area.
-        </div>
-      </div>
-
-      <!-- content after selection -->
-      <div id="local-content" style="display:none;flex-direction:column;flex:1;overflow-y:auto;">
-
-        <div class="sidebar-section">
-          <div class="section-label">Selection stats</div>
-          <table class="info-table w-100">
-            <tr><td>Events</td>    <td id="l-count">—</td></tr>
-            <tr><td>Time span</td> <td id="l-tspan">—</td></tr>
-            <tr><td>Avg quality</td><td id="l-qual">—</td></tr>
-            <tr><td>Depth range</td><td id="l-depth">—</td></tr>
-          </table>
-        </div>
-
-        <div class="sidebar-section">
-          <div class="section-label">Events over time</div>
-          <canvas id="local-time-chart" class="chart-canvas" height="68"></canvas>
-        </div>
-
-        <div class="sidebar-section">
-          <div class="section-label">Depth distribution</div>
-          <canvas id="depth-chart" class="chart-canvas" height="68"></canvas>
-        </div>
-
-        <div class="sidebar-section">
-          <div class="section-label">Quality distribution</div>
-          <canvas id="qual-chart" class="chart-canvas" height="52"></canvas>
-        </div>
-
-        <div class="px-3 pb-3 mt-auto">
-          <button class="btn btn-sm btn-outline-danger w-100" onclick="clearSelection()">
-            <i class="bi bi-x-circle me-1"></i>Clear selection
-          </button>
-        </div>
-
-      </div>
-    </aside>
-
-  </div><!-- /#app-layout -->
-
-  <!-- Bottom time-bar -->
-  <footer id="bottom">
-    <div id="timebar" class="d-flex align-items-center gap-2 px-3 py-2">
-      <button id="play-btn" class="btn btn-sm btn-primary play-btn" onclick="togglePlay()">
-        <i class="bi bi-play-fill" id="play-icon"></i>
-      </button>
-      <input type="range" class="form-range flex-fill" id="tslider"
-             min="0" max="100" value="100" oninput="onTSlider(this.value)"/>
-      <span id="time-label" class="mono text-primary" style="font-size:11px;min-width:210px;text-align:right;">
-        Full dataset
-      </span>
-      <div class="btn-group btn-group-sm ms-1">
-        <button class="btn btn-outline-secondary active" id="win-all"  onclick="setWin(1,   this)">All</button>
-        <button class="btn btn-outline-secondary"        id="win-2w"   onclick="setWin(0.2, this)">2 wks</button>
-        <button class="btn btn-outline-secondary"        id="win-4d"   onclick="setWin(0.07,this)">4 days</button>
-      </div>
+<!-- Bottom time-bar -->
+<footer id="bottom">
+  <div id="timebar" class="d-flex align-items-center gap-2 px-3 py-2">
+    <button id="play-btn" class="btn btn-sm btn-primary play-btn" onclick="togglePlay()">
+      <i class="bi bi-play-fill" id="play-icon"></i>
+    </button>
+    <label for="tslider"></label><input type="range" class="form-range flex-fill" id="tslider"
+                                        min="0" max="100" value="100" oninput="onTSlider(this.value)"/>
+    <span id="time-label" class="mono text-primary"
+          style="font-size:11px;min-width:220px;text-align:right;">
+      Full dataset
+    </span>
+    <div class="btn-group btn-group-sm ms-1">
+      <button class="btn btn-outline-secondary win-btn active" id="win-all" onclick="setWin(1,    this)">All</button>
+      <button class="btn btn-outline-secondary win-btn"        id="win-25"  onclick="setWin(0.25, this)">25%</button>
+      <button class="btn btn-outline-secondary win-btn"        id="win-10"  onclick="setWin(0.1,  this)">10%</button>
     </div>
+  </div>
 
-    <div class="meteo-strip px-3 pb-2">
-      <div class="d-flex align-items-center gap-3 mb-1" style="font-size:10px;color:#999;">
-        <span><span class="dot blue"></span> Temperature (°C)</span>
-        <span><span class="dot green"></span> Precipitation (mm)</span>
-        <span class="ms-auto text-warning"><span class="dot orange"></span> Current time</span>
-      </div>
-      <canvas id="meteo-cv" class="meteo-canvas"></canvas>
+  <div id="meteo-section" class="meteo-strip px-3 pb-2">
+    <div class="d-flex align-items-center gap-3 mb-1" style="font-size:10px;color:#999;">
+      <span><span class="dot blue"></span> Temperature</span>
+      <span><span class="dot green"></span> Precipitation</span>
+      <span class="ms-auto text-warning"><span class="dot orange"></span> Current time</span>
     </div>
-  </footer>
+    <canvas id="meteo-cv" class="meteo-canvas"></canvas>
+  </div>
+</footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="data.js"></script>
-  <script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Datasets — must load before app.js -->
+<script src="data.js"></script>
+<script src="data_traffic.js"></script>
+<script src="data_lorenz.js"></script>
+<script src="app.js"></script>
+
 </body>
 </html>
