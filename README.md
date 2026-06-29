@@ -55,7 +55,7 @@ in `public/`, and prints a progress line for each step.
 ### 3. Open in browser
 
 ```
-public/index.html   ← just double-click it, no server needed
+public/index.html   <- just double-click it, no server needed
 ```
 
 
@@ -67,9 +67,9 @@ data/raw/*.csv
       │  scripts/convert_data.py
       │  - reads each CSV with pandas
       │  - renames columns to unified names (t, x, y, z, q)
-      │  - parses timestamps → Unix seconds
+      │  - parses timestamps -> Unix seconds
       │  - resamples meteo/runoff to hourly (reduces file size)
-      │  - computes metadata (t_min, t_max, x/y/z ranges, axes labels, …)
+      │  - computes metadata (t_min, t_max, x/y/z ranges, axes labels, ...)
       │  - serialises everything as compact JSON
       │
       │  also generates two datasets algorithmically:
@@ -121,7 +121,7 @@ Each event across all datasets shares the same schema:
 | `x` | Primary horizontal axis | metres / attractor units |
 | `y` | Secondary horizontal axis | metres / attractor units |
 | `z` | Vertical axis (depth, elevation, or Z state variable) | metres / attractor units |
-| `q` | Quality / salience score (semblance, inverse severity, trajectory stability) | 0 – 1 |
+| `q` | Quality / salience score (semblance, inverse severity, trajectory stability) | 0 - 1 |
 
 Each dataset file also exposes a `meta` object:
 
@@ -135,10 +135,10 @@ Each dataset file also exposes a `meta` object:
   "has_meteo":  true,
   "count":      37356,
   "t_min":      1593683515.4,
-  "t_max":      …,
-  "x_range":    […, …],
-  "y_range":    […, …],
-  "z_range":    […, …]
+  "t_max":      "...",
+  "x_range":    ["...", "..."],
+  "y_range":    ["...", "..."],
+  "z_range":    ["...", "..."]
 }
 ```
 
@@ -150,22 +150,22 @@ runtime, so switching datasets requires no changes to rendering code.
 
 | Feature | Status |
 |---|---|
-| 3D point cloud — Overview 1 (Three.js) | ✅ |
-| Color by time / Z axis / quality | ✅ |
-| Time slider + playback animation | ✅ |
-| Quality filter | ✅ |
-| Orbit controls (rotate, zoom, touch) | ✅ |
-| Temporal density heatmap — Overview 2 | ✅ |
-| Rubber-band region selection | ✅ |
-| Event trail (temporal sequence polyline) | ✅ |
-| Local: event count over time | ✅ |
-| Local: Z-axis distribution | ✅ |
-| Local: quality distribution | ✅ |
-| Meteo correlation strip | ✅ |
-| Dataset switcher (icequakes / traffic / Lorenz) | ✅ |
-| Multi-dataset coordinate normalization | ✅ |
-| Keyboard shortcuts (Space, R, Esc) | ✅ |
-| Data conversion + generation script | ✅ |
+| 3D point cloud — Overview 1 (Three.js) | ✔ |
+| Color by time / Z axis / quality | ✔ |
+| Time slider + playback animation | ✔ |
+| Quality filter | ✔ |
+| Orbit controls (rotate, zoom, touch) | ✔ |
+| Temporal density heatmap — Overview 2 | ✔ |
+| Rubber-band region selection | ✔ |
+| Event trail (temporal sequence polyline) | ✔ |
+| Local: event count over time | ✔ |
+| Local: Z-axis distribution | ✔ |
+| Local: quality distribution | ✔ |
+| Meteo correlation strip | ✔ |
+| Dataset switcher (icequakes / traffic / Lorenz) | ✔ |
+| Multi-dataset coordinate normalization | ✔ |
+| Keyboard shortcuts (Space, R, Esc) | ✔ |
+| Data conversion + generation script | ✔ |
 
 
 ## Datasets
@@ -175,11 +175,3 @@ runtime, so switching datasets requires no changes to rendering code.
 | Rhône Glacier Icequakes 2020 | 37 356 | Real CSV (data/raw/) | seismic |
 | UK Road Traffic Incidents | 9 000 | Synthetically generated | traffic |
 | Lorenz Attractor | 22 000 | ODE integration (σ=10, ρ=28, β=8/3) | orbital |
-
-
-## Out of scope (future work)
-
-- Virtual / augmented reality rendering
-- Real-time data streaming
-- Automated clustering or ML-based analysis
-- Expert or user evaluation study
