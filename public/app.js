@@ -586,6 +586,7 @@ function drawQualityDistribution(sel) {
 // 8. Meteo chart
 
 function drawMeteo() {
+    if (!DS) return;
 
     const cv = document.getElementById('meteo-cv');
     const W = cv.offsetWidth || 600;
@@ -839,8 +840,8 @@ function init() {
   document.getElementById('s-loaded').textContent = META.count.toLocaleString();
   document.getElementById('s-days').textContent   = days + ' days';*/
 
+  loadDataset('icequakes'); // DS is set first -  if not -> crash
   onResize();
-  loadDataset('icequakes');
   renderLoop();
 }
 
