@@ -289,3 +289,17 @@ html, body {
 /* BOOTSTRAP form-range */
 /* tighten up the default range look */
 .form-range::-webkit-slider-thumb { margin-top: -4px; }
+
+/* Dataset switcher */
+.ds-btn        { font-size: 11px; }
+.ds-btn.active { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+
+/* Heatmap-mode info note already styled inline; this covers hover */
+#heatmap-note { transition: opacity 0.2s; }
+
+/* Keyboard hint labels in viewport */
+kbd {
+  font-family: var(--mono); font-size: 9px;
+  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
+  border-radius: 3px; padding: 1px 4px; color: #ccc;
+}
