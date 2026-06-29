@@ -269,10 +269,6 @@ def write_data_js(events, meteo, runoff, stations):
     """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Compact JSON — no extra spaces to keep file size down
-    def dump(obj):
-        return json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
-
     meta = build_meta(events)
 
     content = "\n".join([
@@ -347,7 +343,7 @@ def generate_lorenz(n_steps=22000):
     }
     return {"meta": meta, "events": events, "meteo": []}
 
-
+# 8. Synthetic UK traffic incidents
 def generate_traffic(n_events=9000, seed=42):
     """Synthetic UK road-accident data with rush-hour temporal patterns."""
     print(f"  Generating {n_events} synthetic traffic incidents ...", end=" ", flush=True)
@@ -417,20 +413,26 @@ def main():
     print(f"Input:  {RAW_DIR}")
     print(f"Output: {OUT_FILE}\n")
 
-    print("[1/4] Events")
+    print("[1/7] Events")
     events = convert_events(sample=args.sample)
 
-    print("[2/4] Meteo")
+    print("[2/7] Meteo")
     meteo = convert_meteo()
 
-    print("[3/4] Runoff")
+    print("[3/7] Runoff")
     runoff = convert_runoff()
 
-    print("[4/4] Stations")
+    print("[4/7] Stations")
     stations = convert_stations()
 
-    print("\n[5/5] Writing data.js ...")
+    print("\n[5/7] Writing data.js ...")
     write_data_js(events, meteo, runoff, stations)
+
+    print("\n[6/7] Lorenz attractor")
+    write_js_const(OUT_DIR / "data_lorenz.js", "DATASET_LORENZ", generate_lorenz())
+
+    print("\n[7/7] Synthetic traffic")
+    write_js_const(OUT_DIR / "data_traffic.js", "DATASET_TRAFFIC", generate_traffic())
 
     print("\nDone. Open public/index.html in your browser.\n")
 
