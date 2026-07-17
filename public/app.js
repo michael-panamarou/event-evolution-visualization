@@ -1,4 +1,4 @@
-// app.js — Icequake Visualization · Prototype v1
+// app.js — Icequake Visualization
 //
 // Modules:
 //   1. Constants & state
@@ -48,6 +48,7 @@ const S = {
   autoRot: false,
   mode: 'orbit',
   viewMode: 'pointcloud',   // ← new
+  showSurface: false,       // ← new (glacier DEM mesh)
   selIdx: [],
 };
 
@@ -303,6 +304,96 @@ function clearTrail() {
   if (trailGroup) { scene.remove(trailGroup); trailGroup = null; }
 }
 
+
+// 4c. Glacier surface mesh  (DEM interpolated from station elevations)
+
+let surfaceMesh = null;
+
+// Builds a semi-transparent surface from the SURFACE grid in data.js.
+// The grid stores z-values (event depth convention) over the east/north
+// extent; each vertex is mapped through the same scene transform as the
+// events, so the surface is spatially registered with the point cloud.
+function buildGlacierSurface() {
+  destroySurface();
+  if (typeof SURFACE === 'undefined' || !SURFACE) return;
+
+  const n = SURFACE.n;
+  const { x_min, x_max, y_min, y_max } = SURFACE;
+
+  // Scene-space mappers matching sceneX / sceneY / sceneZ, but taking raw
+  // east / north / depth values (not an event object).
+  const toSX = east  => X_SPAN > 0.001 ? (east  - X_MIN) / X_SPAN * SCENE_W - SCENE_W/2 : 0;
+  const toSY = depth => Z_SPAN > 0.001 ? (depth - Z_MIN) / Z_SPAN * SCENE_H - SCENE_H/2 : 0;
+  const toSZ = north => Y_SPAN > 0.001 ? (north - Y_MIN) / Y_SPAN * SCENE_W - SCENE_W/2 : 0;
+
+  const geo = new THREE.PlaneGeometry(1, 1, n - 1, n - 1);
+  const pos = geo.attributes.position;
+  const colors = [];
+
+  for (let row = 0; row < n; row++) {
+    for (let col = 0; col < n; col++) {
+      const idx   = row * n + col;
+      const east  = x_min + (x_max - x_min) * (col / (n - 1));
+      const north = y_min + (y_max - y_min) * (row / (n - 1));
+      const depth = SURFACE.z[idx];
+
+      pos.setXYZ(idx, toSX(east), toSY(depth), toSZ(north));
+
+      // Colour by height: shallow (high) = pale blue, deep = darker blue
+      const tHeight = SURFACE.z_max > SURFACE.z_min
+          ? (depth - SURFACE.z_min) / (SURFACE.z_max - SURFACE.z_min) : 0.5;
+      colors.push(0.45 + 0.35 * tHeight, 0.68 + 0.22 * tHeight, 0.95);
+    }
+  }
+  pos.needsUpdate = true;
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.28,
+    side: THREE.DoubleSide, depthWrite: false,
+  });
+
+  surfaceMesh = new THREE.Group();
+  surfaceMesh.add(new THREE.Mesh(geo, mat));
+
+  // Wireframe overlay to make the surface readable against the point cloud
+  surfaceMesh.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    color: 0x7fb2ff, wireframe: true, transparent: true, opacity: 0.15,
+    depthWrite: false,
+  })));
+
+  surfaceMesh.visible = S.showSurface;
+  scene.add(surfaceMesh);
+}
+
+function destroySurface() {
+  if (surfaceMesh) { scene.remove(surfaceMesh); surfaceMesh = null; }
+}
+
+// Returns true if the active dataset has a surface grid
+function datasetHasSurface() {
+  return typeof SURFACE !== 'undefined' && SURFACE &&
+      DS && DS.meta && DS.meta.domain === 'seismic';
+}
+
+function toggleSurface() {
+  S.showSurface = !S.showSurface;
+  if (S.showSurface && !surfaceMesh) buildGlacierSurface();
+  if (surfaceMesh) surfaceMesh.visible = S.showSurface;
+
+  const btn = document.getElementById('surf-btn');
+  if (btn) {
+    btn.className = S.showSurface
+        ? 'btn btn-sm btn-info text-start'
+        : 'btn btn-sm btn-outline-secondary text-start';
+    btn.innerHTML = S.showSurface
+        ? '<i class="bi bi-layers-half me-1"></i>Hide surface'
+        : '<i class="bi bi-layers-half me-1"></i>Show surface';
+  }
+}
+
+
 // 5. Orbit controls
 
 // Spherical coordinates for the camera position
@@ -435,6 +526,51 @@ function clearSelection() {
   selBox.style.display = 'none';
   clearTrail();
   updateLocalPanel();
+}
+
+
+// 6b. Export selected region as CSV
+
+// Builds a CSV of the current selection and triggers a browser download.
+// Column headers adapt to the active dataset's axis labels, and a
+// human-readable ISO time column is added for time-based datasets.
+function exportSelectionCSV() {
+  if (!S.selIdx.length) return;
+
+  const sel = S.selIdx.map(i => DS.events[i]).sort((a, b) => a.t - b.t);
+  const ax  = DS.meta.axes || { x: 'x', y: 'y', z: 'z' };
+  const isTime = DS.meta.domain !== 'orbital';
+
+  // CSV-safe header cell (quote if it contains a comma)
+  const cell = v => {
+    const s = String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+
+  const header = ['t_raw'];
+  if (isTime) header.push('time_iso');
+  header.push(ax.x, ax.y, ax.z, DS.meta.q_label || 'q');
+
+  const lines = [header.map(cell).join(',')];
+  for (const e of sel) {
+    const row = [e.t];
+    if (isTime) row.push(new Date(e.t * 1000).toISOString());
+    row.push(e.x, e.y, e.z, e.q);
+    lines.push(row.map(cell).join(','));
+  }
+  const csv = lines.join('\n');
+
+  // Trigger download via an object URL
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  a.href = url;
+  a.download = `${DS.meta.domain}_selection_${sel.length}events_${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 
@@ -586,24 +722,24 @@ function drawQualityDistribution(sel) {
 // 8. Meteo chart
 
 function drawMeteo() {
-    if (!DS) return;
+  if (!DS) return;
 
-    const cv = document.getElementById('meteo-cv');
-    const W = cv.offsetWidth || 600;
-    cv.width = W;
-    const H = cv.height;
-    const ctx = cv.getContext('2d');
-    ctx.clearRect(0, 0, W, H);
+  const cv = document.getElementById('meteo-cv');
+  const W = cv.offsetWidth || 600;
+  cv.width = W;
+  const H = cv.height;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
 
-    const meteo = DS.meteo || [];
-    if (!meteo.length) {
-      ctx.fillStyle = '#9ca3af'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('No meteorological data for this dataset', W/2, H/2);
-      ctx.textAlign = 'left'; return;
-    }
-    const mt0 = meteo[0].t;
-    const mt1 = meteo[meteo.length - 1].t;
-    const mSpan = mt1 - mt0 || 1;
+  const meteo = DS.meteo || [];
+  if (!meteo.length) {
+    ctx.fillStyle = '#9ca3af'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('No meteorological data for this dataset', W/2, H/2);
+    ctx.textAlign = 'left'; return;
+  }
+  const mt0 = meteo[0].t;
+  const mt1 = meteo[meteo.length - 1].t;
+  const mSpan = mt1 - mt0 || 1;
 
   const temps = meteo.map(m => m.temp);
   const tMin = Math.min(...temps);
@@ -661,7 +797,8 @@ function loadDataset(name) {
 
   // Reset state
   Object.assign(S, { tEnd:1, winFrac:1, qualMin:0.05, colorBy:'time',
-    playing:false, autoRot:false, mode:'orbit', selIdx:[], viewMode:'pointcloud' });
+    playing:false, autoRot:false, mode:'orbit', selIdx:[],
+    viewMode:'pointcloud', showSurface:false });
 
   // Update UI
   document.getElementById('tslider').value = 100;
@@ -688,6 +825,16 @@ function loadDataset(name) {
   const hasMeteo = !!(DS.meteo && DS.meteo.length);
   const meteoSection = document.getElementById('meteo-section');
   if (meteoSection) meteoSection.style.display = hasMeteo ? '' : 'none';
+
+  // Glacier surface: only the seismic dataset has one
+  destroySurface();
+  const surfRow = document.getElementById('surface-row');
+  if (surfRow) surfRow.style.display = datasetHasSurface() ? '' : 'none';
+  const surfBtn = document.getElementById('surf-btn');
+  if (surfBtn) {
+    surfBtn.className = 'btn btn-sm btn-outline-secondary text-start';
+    surfBtn.innerHTML = '<i class="bi bi-layers-half me-1"></i>Show surface';
+  }
 
   // Rebuild
   destroyHeatmap();
@@ -836,9 +983,9 @@ function renderLoop() {
 }
 
 function init() {
-/*  const days = Math.round((META.t_max - META.t_min) / 86400);
-  document.getElementById('s-loaded').textContent = META.count.toLocaleString();
-  document.getElementById('s-days').textContent   = days + ' days';*/
+  /*  const days = Math.round((META.t_max - META.t_min) / 86400);
+    document.getElementById('s-loaded').textContent = META.count.toLocaleString();
+    document.getElementById('s-days').textContent   = days + ' days';*/
 
   loadDataset('icequakes'); // DS is set first -  if not -> crash
   onResize();
