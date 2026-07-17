@@ -259,7 +259,75 @@ def build_meta(events):
 
 # 6. Write public/data.js
 
-def write_data_js(events, meteo, runoff, stations):
+def build_surface(grid_n=48):
+    """
+    Interpolates the glacier surface from the 14 station elevations.
+
+    There is no DEM raster in the dataset, but every station records a
+    surface elevation. We:
+      1. fit the (lat, lon) -> (east_shift, north_shift) transform from the
+         detections CSV (which contains BOTH coordinate systems), so stations
+         can be placed in the same metric space as the events;
+      2. convert each station elevation to the event z-convention (z = -elev,
+         matching the negative 'depth_ellipsoid' the events use);
+      3. interpolate those scattered points onto a regular grid_n x grid_n
+         grid spanning the event east/north extent, using a radial basis
+         function; values are clamped to the observed station range so the
+         extrapolated corners (the station footprint is smaller than the full
+         event extent) cannot diverge.
+
+    Returns a dict consumed by app.js to build a semi-transparent mesh:
+        { "n", "x_min", "x_max", "y_min", "y_max", "z_min", "z_max", "z": [...] }
+    where z is a row-major grid_n*grid_n array of z-values (event convention).
+    """
+    det_path = RAW_DIR / "detections_jittered.csv"
+    st_path  = RAW_DIR / "stations.csv"
+    if not det_path.exists() or not st_path.exists():
+        print("  [SKIP] surface needs detections + stations CSV")
+        return None
+
+    print("  Fitting lat/lon -> east/north transform ...", end=" ", flush=True)
+    det = pd.read_csv(det_path)
+    A = np.column_stack([det["lon"].values, det["lat"].values, np.ones(len(det))])
+    ce, *_ = np.linalg.lstsq(A, det["east_shift"].values,  rcond=None)
+    cn, *_ = np.linalg.lstsq(A, det["north_shift"].values, rcond=None)
+
+    st = pd.read_csv(st_path)
+    As = np.column_stack([st["longitude"].values, st["latitude"].values, np.ones(len(st))])
+    sx = As @ ce                      # station east
+    sy = As @ cn                      # station north
+    sz = -st["elevation"].values      # event z-convention (negative up)
+    print(f"{len(st)} stations placed")
+
+    # Grid spans the full event extent so the surface covers the whole scene
+    x_min, x_max = float(det["east_shift"].min()),  float(det["east_shift"].max())
+    y_min, y_max = float(det["north_shift"].min()), float(det["north_shift"].max())
+
+    print(f"  Interpolating {grid_n}x{grid_n} surface grid ...", end=" ", flush=True)
+    from scipy.interpolate import Rbf
+    rbf = Rbf(sx, sy, sz, function="multiquadric", smooth=1.0)
+
+    gx = np.linspace(x_min, x_max, grid_n)
+    gy = np.linspace(y_min, y_max, grid_n)
+    GX, GY = np.meshgrid(gx, gy)
+    GZ = rbf(GX.ravel(), GY.ravel())
+
+    # Clamp to observed range (+/- small margin) to tame extrapolated corners
+    z_lo, z_hi = float(sz.min()), float(sz.max())
+    margin = 0.15 * (z_hi - z_lo)
+    GZ = np.clip(GZ, z_lo - margin, z_hi + margin)
+
+    print(f"z {GZ.min():.0f}..{GZ.max():.0f} m")
+    return {
+        "n":     grid_n,
+        "x_min": round(x_min, 1), "x_max": round(x_max, 1),
+        "y_min": round(y_min, 1), "y_max": round(y_max, 1),
+        "z_min": round(float(GZ.min()), 1), "z_max": round(float(GZ.max()), 1),
+        "z":     [round(float(v), 1) for v in GZ.ravel()],
+    }
+
+
+def write_data_js(events, meteo, runoff, stations, surface=None):
     """
     Serialises all arrays as JavaScript constants into public/data.js.
 
@@ -291,6 +359,9 @@ def write_data_js(events, meteo, runoff, stations):
         "",
         "// Seismic stations: [ { id, lat, lon, elev, depth }, ... ]",
         f"const STATIONS = {dump(stations)};",
+        "",
+        "// Interpolated glacier surface grid (null for datasets without one)",
+        f"const SURFACE  = {dump(surface)};",
         "",
     ])
 
@@ -413,25 +484,28 @@ def main():
     print(f"Input:  {RAW_DIR}")
     print(f"Output: {OUT_FILE}\n")
 
-    print("[1/7] Events")
+    print("[1/8] Events")
     events = convert_events(sample=args.sample)
 
-    print("[2/7] Meteo")
+    print("[2/8] Meteo")
     meteo = convert_meteo()
 
-    print("[3/7] Runoff")
+    print("[3/8] Runoff")
     runoff = convert_runoff()
 
-    print("[4/7] Stations")
+    print("[4/8] Stations")
     stations = convert_stations()
 
-    print("\n[5/7] Writing data.js ...")
-    write_data_js(events, meteo, runoff, stations)
+    print("[5/8] Glacier surface")
+    surface = build_surface()
 
-    print("\n[6/7] Lorenz attractor")
+    print("\n[6/8] Writing data.js ...")
+    write_data_js(events, meteo, runoff, stations, surface)
+
+    print("\n[7/8] Lorenz attractor")
     write_js_const(OUT_DIR / "data_lorenz.js", "DATASET_LORENZ", generate_lorenz())
 
-    print("\n[7/7] Synthetic traffic")
+    print("\n[8/8] Synthetic traffic")
     write_js_const(OUT_DIR / "data_traffic.js", "DATASET_TRAFFIC", generate_traffic())
 
     print("\nDone. Open public/index.html in your browser.\n")
