@@ -14,7 +14,7 @@ icequake-viz/
 │   │   ├── detections_jittered.csv     seismic events (required)
 │   │   ├── meteo.csv                   meteorological data
 │   │   ├── runoff.csv                  water runoff
-│   │   └── stations.csv                sensor positions
+│   │   └── stations.csv                sensor positions (required for the surface)
 │   │
 │   └── processed/                    <- (reserved for future intermediate files)
 │
@@ -25,6 +25,7 @@ icequake-viz/
     ├── index.html
     ├── style.css
     ├── app.js
+    ├── benchmark.js                  <- optional performance harness (see Benchmarking)
     ├── data.js                       <- auto-generated (icequakes)
     ├── data_traffic.js               <- auto-generated (synthetic traffic)
     └── data_lorenz.js                <- auto-generated (Lorenz attractor)
@@ -70,13 +71,15 @@ data/raw/*.csv
       │  - parses timestamps -> Unix seconds
       │  - resamples meteo/runoff to hourly (reduces file size)
       │  - computes metadata (t_min, t_max, x/y/z ranges, axes labels, ...)
+      │  - interpolates the glacier surface from the 14 station elevations
+      │    (RBF onto a 48x48 grid; skipped if stations.csv is missing)
       │  - serialises everything as compact JSON
       │
       │  also generates two datasets algorithmically:
       │  - Lorenz attractor (scipy ODE integration, 22 000 steps)
       │  - Synthetic UK traffic (numpy random, 9 000 events)
       ▼
-public/data.js          <- icequakes:  EV, METEO, RUNOFF, STATIONS, META
+public/data.js          <- icequakes:  EV, METEO, RUNOFF, STATIONS, SURFACE, META
 public/data_lorenz.js   <- Lorenz:     DATASET_LORENZ
 public/data_traffic.js  <- Traffic:    DATASET_TRAFFIC
       │
@@ -158,14 +161,17 @@ runtime, so switching datasets requires no changes to rendering code.
 | Temporal density heatmap — Overview 2 | ✔ |
 | Rubber-band region selection | ✔ |
 | Event trail (temporal sequence polyline) | ✔ |
+| Glacier surface mesh (interpolated DEM, seismic dataset only) | ✔ |
 | Local: event count over time | ✔ |
 | Local: Z-axis distribution | ✔ |
 | Local: quality distribution | ✔ |
 | Meteo correlation strip | ✔ |
+| Export selected region as CSV | ✔ |
 | Dataset switcher (icequakes / traffic / Lorenz) | ✔ |
 | Multi-dataset coordinate normalization | ✔ |
 | Keyboard shortcuts (Space, R, Esc) | ✔ |
 | Data conversion + generation script | ✔ |
+| Performance benchmark harness | ✔ |
 
 
 ## Datasets
@@ -175,3 +181,137 @@ runtime, so switching datasets requires no changes to rendering code.
 | Rhône Glacier Icequakes 2020 | 37 356 | Real CSV (data/raw/) | seismic |
 | UK Road Traffic Incidents | 9 000 | Synthetically generated | traffic |
 | Lorenz Attractor | 22 000 | ODE integration (σ=10, ρ=28, β=8/3) | orbital |
+
+
+## Benchmarking
+
+`public/benchmark.js` is a measurement harness that records three performance
+quantities: steady-state frame rate, point-cloud rebuild latency, and heatmap
+construction time. It is not part of the visualization — it only reads and
+drives the code `app.js` already exposes.
+
+### 1. Load the harness
+
+The harness must load *after* `app.js`, because it drives state that `app.js`
+creates during `init()`. Add one line at the bottom of `public/index.html`:
+
+```html
+<script src="data.js"></script>
+<script src="data_traffic.js"></script>
+<script src="data_lorenz.js"></script>
+<script src="app.js"></script>
+<script src="benchmark.js"></script>   <!-- must come last -->
+```
+
+To keep the harness out of the shipped prototype, leave the tag out and load it
+on demand instead:
+
+```html
+<script>
+  if (new URLSearchParams(location.search).has('bench'))
+    document.write('<script src="benchmark.js"><\/script>');
+</script>
+```
+
+`index.html?bench=1` then loads it; plain `index.html` does not. Pasting the
+file's contents straight into the DevTools console works identically — console
+code is evaluated in global scope, which is exactly what the harness needs.
+
+### 2. Run it
+
+Open `public/index.html`, select the dataset you want to measure, press F12 and
+run:
+
+```js
+await runBenchmark()
+```
+
+A run takes roughly 30–60 seconds. Results are printed as a `console.table`,
+returned as an array, and also emitted as ready-to-paste LaTeX rows:
+
+```
+┌─────────┬────────┬─────┬────────────┬────────────┐
+│ (index) │ events │ fps │ rebuild_ms │ heatmap_ms │
+├─────────┼────────┼─────┼────────────┼────────────┤
+│ 0       │ 1000   │ ... │ ...        │ ...        │
+│ 1       │ 5000   │ ... │ ...        │ ...        │
+│ 2       │ 10000  │ ... │ ...        │ ...        │
+│ 3       │ 37356  │ ... │ ...        │ ...        │
+└─────────┴────────┴─────┴────────────┴────────────┘
+```
+
+Before running, close other tabs and applications, call `clearSelection()`, and
+hide the glacier surface — all three affect the numbers. Reload the page
+afterwards: the harness writes `S` directly, so the sidebar controls will show
+stale values once it finishes.
+
+Record the machine's CPU, GPU, OS, and browser version alongside any figure you
+publish. The numbers are not comparable without them.
+
+### 3. Configuration
+
+```js
+const BENCH_SAMPLES = [1000, 5000, 10000, 37356];  // event counts to test
+const BENCH_FRAMES  = 180;                         // ~3 s at 60 fps
+const BENCH_REPEATS = 20;                          // rebuild timing repeats
+```
+
+`37356` is the icequake event count. For the traffic (9 000) and Lorenz
+(22 000) datasets, any target above the dataset size measures the full dataset,
+so adjust `BENCH_SAMPLES` per dataset to avoid duplicate rows.
+
+
+## How the benchmark works
+
+```
+runBenchmark()
+      │
+      │  setViewMode('pointcloud'); S.qualMin = 0; S.tEnd = 1; S.winFrac = 1
+      │  - removes every filter so each sample size renders all n events
+      │
+      ├─ for each n in BENCH_SAMPLES:
+      │
+      │    _benchSubsample(n)
+      │      - takes every (len/n)-th event -> even coverage across time,
+      │        not just the first n
+      │      - swaps DS.events, N, tNorm, qArr for the reduced set
+      │      - returns a closure that restores the originals
+      │
+      │    _benchFPS()      counts 180 requestAnimationFrame callbacks
+      │    _benchRebuild()  median of 20 x rebuildPointCloud()
+      │    _benchHeatmap()  median of 5 x buildDensityHeatmap()
+      │
+      │    restore(); rebuildPointCloud()
+      ▼
+console.table + LaTeX rows + returned array
+```
+
+**Why the harness can reach into `app.js`.** Both files are plain classic
+scripts, not ES modules. Top-level `let` declarations in a classic script are
+not file-scoped — they live in the global lexical environment shared by every
+classic script on the page. `benchmark.js` can therefore read *and reassign*
+`DS`, `N`, `tNorm`, `qArr`, `T0` and `TSPAN` from `app.js`, and call
+`rebuildPointCloud()`, `buildDensityHeatmap()`, `destroyHeatmap()` and
+`setViewMode()` directly. `S` and `ALL_DATASETS` are `const`, so the harness
+only mutates their properties and never rebinds them. Switching the project to
+`type="module"` would break this and require explicit exports.
+
+**Why the FPS figure is meaningful.** `renderLoop()` in `app.js` calls
+`renderer.render()` on every animation frame unconditionally, rather than
+re-rendering on demand. Counting rAF callbacks therefore measures actual render
+cost. The caveat is the vsync ceiling: the browser will not schedule frames
+faster than the display refresh, so small sample sizes report ~60 (or 120/144)
+simply because rendering is not the bottleneck. Read a capped value as "well
+within budget", never as the technique's upper limit.
+
+**Why medians, not means.** Garbage collection, compositor work and OS
+scheduling produce occasional multi-millisecond outliers that would skew an
+average. `_median()` over 20 repeats is robust to them, and the repeats also let
+the JIT warm up — the first `rebuildPointCloud()` call is consistently slower
+than the rest.
+
+**Why the dataset is restored.** `DS` references the same object held in
+`ALL_DATASETS`, so `DS.events = sub` mutates the shared dataset. The closure
+returned by `_benchSubsample()` puts the original array and the derived typed
+arrays back, and is called after every sample size. If a run throws part-way
+through, reload the page rather than trusting the in-memory state.
