@@ -184,6 +184,21 @@
       </div>
     </div>
 
+    <!-- Layers (glacier surface — seismic dataset only) -->
+    <div class="sidebar-section" id="surface-row">
+      <div class="section-label">Layers</div>
+      <div class="d-grid gap-1">
+        <button id="surf-btn"
+                class="btn btn-sm btn-outline-secondary text-start"
+                onclick="toggleSurface()">
+          <i class="bi bi-layers-half me-1"></i>Show surface
+        </button>
+      </div>
+      <div style="font-size:9px;color:#9ca3af;margin-top:5px;line-height:1.4;">
+        Glacier surface interpolated from 14 station elevations.
+      </div>
+    </div>
+
     <!-- Interaction mode -->
     <div class="sidebar-section">
       <div class="section-label">Interaction</div>
@@ -303,8 +318,11 @@
         <canvas id="qual-chart" class="chart-canvas" height="52"></canvas>
       </div>
 
-      <!-- Clear button pinned to bottom -->
-      <div class="px-3 pb-3 mt-auto">
+      <!-- Export + clear buttons pinned to bottom -->
+      <div class="px-3 pb-3 mt-auto d-grid gap-1">
+        <button class="btn btn-sm btn-success w-100" onclick="exportSelectionCSV()">
+          <i class="bi bi-download me-1"></i>Export region as CSV
+        </button>
         <button class="btn btn-sm btn-outline-danger w-100" onclick="clearSelection()">
           <i class="bi bi-x-circle me-1"></i>Clear selection
         </button>
