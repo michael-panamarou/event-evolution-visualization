@@ -243,6 +243,8 @@ function rebuildPointCloud() {
 
   pointCloud = new THREE.Points(geo, mat);
   pointCloud.userData.visIndices = visIndices;
+  pointCloud.userData.baseColors = null;   // buffer replaced; cache is stale
+  if (S.selIdx.length) applySelectionColors();
   scene.add(pointCloud);
 
   // Update header stat
@@ -596,10 +598,16 @@ function drawEventTrail(selEvs) {
   const sorted = [...selEvs].sort((a, b) => a.t - b.t);
   const pts    = sorted.map(e => new THREE.Vector3(sceneX(e), sceneY(e), sceneZ(e)));
 
-  trailGroup.add(new THREE.Line(
+  // The trail runs through the cloud it was selected from, so it is drawn last
+  // and without depth testing. Otherwise individual segments z-fight with the
+  // points they connect and the path breaks up.
+  const trailLine = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.75, transparent: true })
-  ));
+      new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.85,
+        transparent: true, depthTest: false })
+  );
+  trailLine.renderOrder = 20;
+  trailGroup.add(trailLine);
 
   const mkSphere = (color, pos) => {
     const m = new THREE.Mesh(new THREE.SphereGeometry(5, 10, 10),
@@ -988,11 +996,50 @@ function findEventsInBox(sx0, sy0, sx1, sy1) {
   }
 
   S.selIdx = found;
+  applySelectionColors();
   updateLocalPanel();
+}
+
+// Figure-ground separation for a selection: selected events are drawn white and
+// the rest are desaturated towards grey. Written straight into the existing
+// colour buffer, so no geometry is rebuilt. A pristine copy of the colours is
+// kept so that clearing the selection restores them exactly.
+function applySelectionColors() {
+  if (!pointCloud) return;
+  const col = pointCloud.geometry.attributes.color;
+  const vis = pointCloud.userData.visIndices;
+  if (!col || !vis) return;
+
+  if (!S.selIdx.length) {
+    if (pointCloud.userData.baseColors) {
+      col.array.set(pointCloud.userData.baseColors);
+      col.needsUpdate = true;
+      pointCloud.userData.baseColors = null;
+    }
+    return;
+  }
+  if (!pointCloud.userData.baseColors)
+    pointCloud.userData.baseColors = col.array.slice();
+
+  const base = pointCloud.userData.baseColors;
+  const sel  = new Set(S.selIdx);
+  for (let i = 0; i < vis.length; i++) {
+    const o = i * 3;
+    if (sel.has(vis[i])) {
+      col.array[o] = 1; col.array[o + 1] = 1; col.array[o + 2] = 1;
+    } else {
+      const g = (base[o] + base[o + 1] + base[o + 2]) / 3;
+      col.array[o]     = base[o]     * 0.22 + g * 0.40;
+      col.array[o + 1] = base[o + 1] * 0.22 + g * 0.40;
+      col.array[o + 2] = base[o + 2] * 0.22 + g * 0.40;
+    }
+  }
+  col.needsUpdate = true;
 }
 
 function clearSelection() {
   S.selIdx = [];
+  applySelectionColors();
   selBox.style.display = 'none';
   clearTrail();
   updateLocalPanel();
@@ -1455,16 +1502,25 @@ function togglePlay() {
 
   if (S.playing) {
     if (S.tEnd >= 1.0) S.tEnd = 0.05;
-    playInterval = setInterval(() => {
+    // Advance on animation frames, not on a timer. A fixed 60 ms interval runs
+    // independently of the render loop, so at large event counts - where a
+    // frame costs more than 60 ms - playback queues up work faster than it can
+    // be drawn. Driving it from requestAnimationFrame keeps the two in step and
+    // makes playback degrade to a lower speed instead of to a backlog.
+    const stepPlayback = () => {
+      if (!S.playing) { playInterval = null; return; }
       S.tEnd = Math.min(1.0, S.tEnd + 0.004);
       document.getElementById('tslider').value = S.tEnd * 100;
       rebuildPointCloud();
       updateHeatmapWindow();
       drawMeteo();
-      if (S.tEnd >= 1.0) togglePlay();
-    }, 60);
+      if (S.tEnd >= 1.0) { togglePlay(); return; }
+      playInterval = requestAnimationFrame(stepPlayback);
+    };
+    playInterval = requestAnimationFrame(stepPlayback);
   } else {
-    clearInterval(playInterval);
+    if (playInterval !== null) cancelAnimationFrame(playInterval);
+    playInterval = null;
   }
 }
 

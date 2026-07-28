@@ -35,6 +35,8 @@ icequake-viz/
     ├── style.css
     ├── app.js
     ├── benchmark.js                  <- optional performance harness (see Benchmarking)
+    ├── vendor/                       <- Three.js r128, Bootstrap 5 + icons
+    │                                    (vendored, so the prototype runs offline)
     ├── data.js                       <- auto-generated (icequakes)
     ├── data_traffic.js               <- auto-generated (real STATS19 collisions)
     └── data_lorenz.js                <- auto-generated (Lorenz attractor)
@@ -87,6 +89,9 @@ python scripts/convert_data.py --with-synthetic-traffic
 ```
 public/index.html   <- just double-click it, no server needed
 ```
+
+Three.js and Bootstrap are vendored under `public/vendor/`, so this works with no
+network connection. Nothing is fetched at runtime.
 
 
 ## How the conversion works
@@ -181,12 +186,12 @@ The visualization reads all axis labels and display strings from `meta` at
 runtime, so switching datasets requires no changes to rendering code.
 
 
-## What's implemented
+## What's implemented (Prototype v2)
 
 Grouped by the three techniques the thesis defines: two overviews and one local
 view. Everything below was checked against the code, not just the changelog.
 
-### Overview 1 - 3D point cloud
+### Overview 1 — 3D point cloud
 
 | Feature | Status |
 |---|---|
@@ -200,7 +205,7 @@ view. Everything below was checked against the code, not just the changelog.
 | Seismic station markers on the ice surface | ✔ |
 | Vertical exaggeration control, ×1 = true scale, per-dataset range | ✔ |
 
-### Overview 2 - density / Space-Time Cube
+### Overview 2 — density / Space-Time Cube
 
 | Feature | Status |
 |---|---|
@@ -209,7 +214,7 @@ view. Everything below was checked against the code, not just the changelog.
 | Flat density base for datasets with no terrain (Lorenz) | ✔ |
 | Absolute vs. hour-of-day (cyclic) time axis | ✔ |
 
-### Local view - Event Trail
+### Local view — Event Trail
 
 | Feature | Status |
 |---|---|
