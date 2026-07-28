@@ -32,6 +32,7 @@ Adding a new dataset
 """
 
 import argparse, json, sys
+import sys
 from pathlib import Path
 import numpy as np
 
@@ -202,11 +203,118 @@ def convert_runoff():
 
 # 4. Stations
 
+# Fallback station list: stations.csv ships empty in some archive builds,
+# so the 14 sensor positions are kept here to keep the pipeline reproducible.
+STATIONS_FALLBACK = [
+    {
+        "id": "4D.RA81",
+        "lat": 46.600138,
+        "lon": 8.381638,
+        "elev": 2519.7,
+        "depth": 5.0
+    },
+    {
+        "id": "4D.RA82",
+        "lat": 46.599631,
+        "lon": 8.384033,
+        "elev": 2503.0,
+        "depth": 5.0
+    },
+    {
+        "id": "4D.RA83",
+        "lat": 46.597597,
+        "lon": 8.383665,
+        "elev": 2480.5,
+        "depth": 5.0
+    },
+    {
+        "id": "4D.RA84",
+        "lat": 46.596877,
+        "lon": 8.381905,
+        "elev": 2468.8,
+        "depth": 5.0
+    },
+    {
+        "id": "4D.RA85",
+        "lat": 46.597684,
+        "lon": 8.379753,
+        "elev": 2485.4,
+        "depth": 5.0
+    },
+    {
+        "id": "4D.RA86",
+        "lat": 46.599665,
+        "lon": 8.379658,
+        "elev": 2515.8,
+        "depth": 5.0
+    },
+    {
+        "id": "4D.RA87",
+        "lat": 46.59863,
+        "lon": 8.381721,
+        "elev": 2493.1,
+        "depth": 5.0
+    },
+    {
+        "id": "4D.RA88",
+        "lat": 46.601512,
+        "lon": 8.381616,
+        "elev": 2542.1,
+        "depth": 5.0
+    },
+    {
+        "id": "4D.RA91",
+        "lat": 46.600404,
+        "lon": 8.383414,
+        "elev": 2511.0,
+        "depth": 136.0
+    },
+    {
+        "id": "4D.RA91",
+        "lat": 46.600094,
+        "lon": 8.383174,
+        "elev": 2509.2,
+        "depth": 1.0
+    },
+    {
+        "id": "4D.RA92",
+        "lat": 46.6001,
+        "lon": 8.38355,
+        "elev": 2505.0,
+        "depth": 137.0
+    },
+    {
+        "id": "4D.RA92",
+        "lat": 46.59988,
+        "lon": 8.38316,
+        "elev": 2503.0,
+        "depth": 142.0
+    },
+    {
+        "id": "4D.RA93",
+        "lat": 46.60009,
+        "lon": 8.38278,
+        "elev": 2509.0,
+        "depth": 140.0
+    },
+    {
+        "id": "4D.RA93",
+        "lat": 46.60038,
+        "lon": 8.38293,
+        "elev": 2514.0,
+        "depth": 141.0
+    }
+]
+
+
 def convert_stations():
     """
     Reads stations.csv → list of { id, lat, lon, elev, depth } dicts.
     """
     csv_path = RAW_DIR / "stations.csv"
+    if not csv_path.exists() or csv_path.stat().st_size == 0:
+        print(f"{len(STATIONS_FALLBACK)} stations (from built-in fallback; stations.csv empty)")
+        return [dict(st) for st in STATIONS_FALLBACK]
     if not csv_path.exists():
         print(f"  [SKIP] {csv_path.name} not found")
         return []
@@ -259,75 +367,100 @@ def build_meta(events):
 
 # 6. Write public/data.js
 
-def build_surface(grid_n=48):
+def build_dem(grid_n=200):
     """
-    Interpolates the glacier surface from the 14 station elevations.
+    Builds the glacier SURFACE and BEDROCK grids from the real Rhone Glacier
+    DEM (data/raw/DEM), resampled onto the event footprint.
 
-    There is no DEM raster in the dataset, but every station records a
-    surface elevation. We:
+    The DEM ships as six np.savetxt text arrays on an 844 x 385 curvilinear
+    lat/lon grid:
+        lat_dem_np / lon_dem_np / zv_dem_np   -> ice surface elevation [m a.s.l.]
+        zv_bed_np                             -> bedrock elevation     [m a.s.l.]
+                                                 (on the same lat/lon grid)
+
+    Steps:
       1. fit the (lat, lon) -> (east_shift, north_shift) transform from the
-         detections CSV (which contains BOTH coordinate systems), so stations
-         can be placed in the same metric space as the events;
-      2. convert each station elevation to the event z-convention (z = -elev,
-         matching the negative 'depth_ellipsoid' the events use);
-      3. interpolate those scattered points onto a regular grid_n x grid_n
-         grid spanning the event east/north extent, using a radial basis
-         function; values are clamped to the observed station range so the
-         extrapolated corners (the station footprint is smaller than the full
-         event extent) cannot diverge.
+         detections CSV, which carries BOTH coordinate systems;
+      2. project every DEM node into that metric system;
+      3. resample both layers onto a regular grid_n x grid_n grid spanning the
+         event extent (linear, nearest-neighbour fill for any gap).
 
-    Returns a dict consumed by app.js to build a semi-transparent mesh:
+    Returns (surface, bedrock), each a dict consumed by app.js:
         { "n", "x_min", "x_max", "y_min", "y_max", "z_min", "z_max", "z": [...] }
-    where z is a row-major grid_n*grid_n array of z-values (event convention).
+    with z in the event convention (z = -elevation), row-major.
+
+    NOTE: this replaces the earlier station-interpolation approach. Fitting a
+    surface through only 14 station elevations left ~97% of the grid clamped
+    flat and produced a plate-with-a-crater artefact rather than terrain.
     """
     det_path = RAW_DIR / "detections_jittered.csv"
-    st_path  = RAW_DIR / "stations.csv"
-    if not det_path.exists() or not st_path.exists():
-        print("  [SKIP] surface needs detections + stations CSV")
-        return None
+    dem_dir  = RAW_DIR / "DEM"
+    # lat_bed_np / lon_bed_np were byte-identical copies of lat_dem_np /
+    # lon_dem_np (both DEMs are sampled on the same lat/lon grid) and were
+    # never loaded - only the four files below are read, at ~8 MB each.
+    need = ["lat_dem_np", "lon_dem_np", "zv_dem_np", "zv_bed_np"]
+    if not det_path.exists() or not all((dem_dir / f).exists() for f in need):
+        print("  [SKIP] DEM needs detections CSV + data/raw/DEM/*")
+        return None, None
+
+    from scipy.interpolate import griddata
 
     print("  Fitting lat/lon -> east/north transform ...", end=" ", flush=True)
     det = pd.read_csv(det_path)
-    A = np.column_stack([det["lon"].values, det["lat"].values, np.ones(len(det))])
-    ce, *_ = np.linalg.lstsq(A, det["east_shift"].values,  rcond=None)
-    cn, *_ = np.linalg.lstsq(A, det["north_shift"].values, rcond=None)
+    A = np.column_stack([det.lon, det.lat, np.ones(len(det))])
+    ce, *_ = np.linalg.lstsq(A, det.east_shift.values,  rcond=None)
+    cn, *_ = np.linalg.lstsq(A, det.north_shift.values, rcond=None)
+    res_e = float(np.std(det.east_shift.values  - A @ ce))
+    res_n = float(np.std(det.north_shift.values - A @ cn))
+    print(f"residual {res_e:.3f} / {res_n:.3f} m")
 
-    st = pd.read_csv(st_path)
-    As = np.column_stack([st["longitude"].values, st["latitude"].values, np.ones(len(st))])
-    sx = As @ ce                      # station east
-    sy = As @ cn                      # station north
-    sz = -st["elevation"].values      # event z-convention (negative up)
-    print(f"{len(st)} stations placed")
+    print("  Loading DEM rasters ...", end=" ", flush=True)
+    lat = np.loadtxt(dem_dir / "lat_dem_np"); lon = np.loadtxt(dem_dir / "lon_dem_np")
+    z_s = np.loadtxt(dem_dir / "zv_dem_np");  z_b = np.loadtxt(dem_dir / "zv_bed_np")
+    print(f"{lat.shape[0]}x{lat.shape[1]} nodes")
 
-    # Grid spans the full event extent so the surface covers the whole scene
-    x_min, x_max = float(det["east_shift"].min()),  float(det["east_shift"].max())
-    y_min, y_max = float(det["north_shift"].min()), float(det["north_shift"].max())
+    E = ce[0] * lon + ce[1] * lat + ce[2]
+    N = cn[0] * lon + cn[1] * lat + cn[2]
 
-    print(f"  Interpolating {grid_n}x{grid_n} surface grid ...", end=" ", flush=True)
-    from scipy.interpolate import Rbf
-    rbf = Rbf(sx, sy, sz, function="multiquadric", smooth=1.0)
+    ex0, ex1 = float(det.east_shift.min()),  float(det.east_shift.max())
+    ny0, ny1 = float(det.north_shift.min()), float(det.north_shift.max())
+    margin = 120.0
+    sel = (E > ex0 - margin) & (E < ex1 + margin) & (N > ny0 - margin) & (N < ny1 + margin)
+    pts = np.column_stack([E[sel], N[sel]])
+    print(f"  {sel.sum()} DEM nodes inside the event footprint")
 
-    gx = np.linspace(x_min, x_max, grid_n)
-    gy = np.linspace(y_min, y_max, grid_n)
+    gx = np.linspace(ex0, ex1, grid_n); gy = np.linspace(ny0, ny1, grid_n)
     GX, GY = np.meshgrid(gx, gy)
-    GZ = rbf(GX.ravel(), GY.ravel())
 
-    # Clamp to observed range (+/- small margin) to tame extrapolated corners
-    z_lo, z_hi = float(sz.min()), float(sz.max())
-    margin = 0.15 * (z_hi - z_lo)
-    GZ = np.clip(GZ, z_lo - margin, z_hi + margin)
+    def resample(src):
+        out = griddata(pts, src[sel], (GX, GY), method="linear")
+        bad = np.isnan(out)
+        if bad.any():
+            out[bad] = griddata(pts, src[sel], (GX[bad], GY[bad]), method="nearest")
+        return out
 
-    print(f"z {GZ.min():.0f}..{GZ.max():.0f} m")
-    return {
-        "n":     grid_n,
-        "x_min": round(x_min, 1), "x_max": round(x_max, 1),
-        "y_min": round(y_min, 1), "y_max": round(y_max, 1),
-        "z_min": round(float(GZ.min()), 1), "z_max": round(float(GZ.max()), 1),
-        "z":     [round(float(v), 1) for v in GZ.ravel()],
-    }
+    print(f"  Resampling {grid_n}x{grid_n} surface + bedrock ...", end=" ", flush=True)
+    surf = resample(z_s); bed = resample(z_b)
+    print("done")
+
+    def pack(arr):
+        z = (-arr).ravel()          # event convention: z = -elevation
+        return {
+            "n": grid_n,
+            "x_min": round(ex0, 1), "x_max": round(ex1, 1),
+            "y_min": round(ny0, 1), "y_max": round(ny1, 1),
+            "z_min": round(float(z.min()), 1), "z_max": round(float(z.max()), 1),
+            "z": [round(float(v), 1) for v in z],
+        }
+
+    thick = surf - bed
+    print(f"  ice surface {surf.min():.0f}..{surf.max():.0f} m, "
+          f"bedrock {bed.min():.0f}..{bed.max():.0f} m, "
+          f"thickness median {np.median(thick):.0f} m")
+    return pack(surf), pack(bed), (ce, cn)
 
 
-def write_data_js(events, meteo, runoff, stations, surface=None):
+def write_data_js(events, meteo, runoff, stations, surface=None, bedrock=None):
     """
     Serialises all arrays as JavaScript constants into public/data.js.
 
@@ -360,8 +493,11 @@ def write_data_js(events, meteo, runoff, stations, surface=None):
         "// Seismic stations: [ { id, lat, lon, elev, depth }, ... ]",
         f"const STATIONS = {dump(stations)};",
         "",
-        "// Interpolated glacier surface grid (null for datasets without one)",
+        "// Glacier ice-surface DEM grid (null for datasets without one)",
         f"const SURFACE  = {dump(surface)};",
+        "",
+        "// Bedrock DEM grid beneath the ice (null for datasets without one)",
+        f"const BEDROCK  = {dump(bedrock)};",
         "",
     ])
 
@@ -496,17 +632,39 @@ def main():
     print("[4/8] Stations")
     stations = convert_stations()
 
-    print("[5/8] Glacier surface")
-    surface = build_surface()
+    print("[5/8] Glacier DEM (ice surface + bedrock)")
+    surface, bedrock, coef = (None, None, None)
+    _dem = build_dem()
+    if _dem and _dem[0] is not None:
+        surface, bedrock, coef = _dem
+        # give every station its metric position, so app.js can draw the markers
+        if stations and coef is not None:
+            ce, cn = coef
+            for st in stations:
+                st["east"]  = round(float(ce[0]*st["lon"] + ce[1]*st["lat"] + ce[2]), 1)
+                st["north"] = round(float(cn[0]*st["lon"] + cn[1]*st["lat"] + cn[2]), 1)
+                st["z"]     = round(-float(st["elev"]), 1)
 
     print("\n[6/8] Writing data.js ...")
-    write_data_js(events, meteo, runoff, stations, surface)
+    write_data_js(events, meteo, runoff, stations, surface, bedrock)
 
     print("\n[7/8] Lorenz attractor")
     write_js_const(OUT_DIR / "data_lorenz.js", "DATASET_LORENZ", generate_lorenz())
 
-    print("\n[8/8] Synthetic traffic")
-    write_js_const(OUT_DIR / "data_traffic.js", "DATASET_TRAFFIC", generate_traffic())
+    # NOTE: this is the *synthetic* traffic baseline (z = 0, no real terrain).
+    # The dataset the prototype actually loads is the real STATS19 catalogue
+    # written by scripts/convert_traffic_stats19.py. Both used to write
+    # public/data_traffic.js, so re-running this script silently replaced the
+    # real data with the synthetic set. It now writes its own file and the
+    # generator is opt-in.
+    if "--with-synthetic-traffic" in sys.argv:
+        print("\n[8/8] Synthetic traffic baseline")
+        write_js_const(OUT_DIR / "data_traffic_synthetic.js",
+                       "DATASET_TRAFFIC_SYNTHETIC", generate_traffic())
+    else:
+        print("\n[8/8] Synthetic traffic baseline - skipped "
+              "(pass --with-synthetic-traffic to regenerate it)")
+        print("      real traffic data: python scripts/convert_traffic_stats19.py")
 
     print("\nDone. Open public/index.html in your browser.\n")
 
