@@ -112,6 +112,30 @@
 
       </div>
 
+      <div class="section-label mt-3">Vertical exaggeration</div>
+      <div class="d-flex align-items-center gap-2">
+        <input type="range" class="form-range flex-grow-1" id="exag-slider"
+               min="1" max="30" step="0.5" value="10"
+               oninput="setVertExag(this.value)">
+        <span id="exag-val" style="font-size:10px;color:#9ca3af;min-width:70px;">&times;10</span>
+      </div>
+      <div style="font-size:9px;color:#9ca3af;margin-top:3px;line-height:1.4;">
+        How much the height axis is stretched relative to the map. &times;1 is true
+        scale; wide-area datasets need some exaggeration to show any relief at all.
+      </div>
+
+      <div class="section-label mt-3">Time axis (cube mode)</div>
+      <div class="btn-group w-100" role="group">
+        <button id="tm-abs" class="btn btn-sm btn-primary"
+                onclick="setTimeMode('absolute')">Absolute</button>
+        <button id="tm-cyc" class="btn btn-sm btn-outline-secondary"
+                onclick="setTimeMode('cyclic')">Hour of day</button>
+      </div>
+      <div style="font-size:9px;color:#9ca3af;margin-top:5px;line-height:1.4;">
+        <b>Hour of day</b> folds all days onto a single 0&ndash;24 h axis, so
+        recurring daily rhythms (rush hours) show up as horizontal bands.
+      </div>
+
       <!-- Shown only in heatmap mode -->
       <div id="heatmap-note"
            class="mt-2 p-2 rounded"
@@ -120,7 +144,7 @@
                     border: 1px solid #fcd34d;
                     font-size: 10px;
                     color: #92400e;">
-        <i class="bi bi-info-circle me-1"></i>Vertical axis = time. Each layer = one time slice.
+        <i class="bi bi-info-circle me-1"></i><span id="stc-note-text">Space-Time Cube on the terrain DEM: the surface below shows real elevation in true coordinates; above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place. Colour = intensity of activity.</span>
       </div>
     </div>
 
@@ -195,7 +219,7 @@
         </button>
       </div>
       <div style="font-size:9px;color:#9ca3af;margin-top:5px;line-height:1.4;">
-        Glacier surface interpolated from 14 station elevations.
+        <span id="surf-caption">Real Rh&ocirc;ne Glacier DEM: ice surface and bedrock, with the icequakes in the ice column between them.</span>
       </div>
     </div>
 
@@ -241,9 +265,7 @@
 
     <!-- Axis labels overlay -->
     <div class="axis-hint">
-        <span id="axis-hint-label"
-              class="text-muted"
-              style="font-size: 10px; font-family: monospace;"></span>
+      <span id="axis-hint-label"></span>
     </div>
 
     <!-- HUD: orbit mode hint -->
@@ -390,10 +412,6 @@
      Note: dataset files must load before app.js
      ============================================================ -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="data.js"></script>
-<script src="data_traffic.js"></script>
-<script src="data_lorenz.js"></script>
-<script src="app.js"></script>
 <script src="data.js"></script>
 <script src="data_traffic.js"></script>
 <script src="data_lorenz.js"></script>
