@@ -181,33 +181,71 @@ The visualization reads all axis labels and display strings from `meta` at
 runtime, so switching datasets requires no changes to rendering code.
 
 
-## What's implemented (Prototype v2)
+## What's implemented
+
+Grouped by the three techniques the thesis defines: two overviews and one local
+view. Everything below was checked against the code, not just the changelog.
+
+### Overview 1 - 3D point cloud
 
 | Feature | Status |
 |---|---|
-| 3D point cloud — Overview 1 (Three.js) | ✔ |
-| Color by time / Z axis / quality | ✔ |
-| Time slider + playback animation | ✔ |
-| Quality filter | ✔ |
-| Orbit controls (rotate, zoom, touch) | ✔ |
-| Temporal density heatmap — Overview 2 | ✔ |
-| Rubber-band region selection | ✔ |
-| Event trail (temporal sequence polyline) | ✔ |
-| Real DEM terrain — glacier ice surface + bedrock, SRTM relief for traffic | ✔ |
-| Space-Time Cube standing on the DEM | ✔ |
-| Hour-of-day (cyclic) time axis | ✔ |
-| Vertical exaggeration control | ✔ |
-| Local: event count over time | ✔ |
-| Local: Z-axis distribution | ✔ |
-| Local: quality distribution | ✔ |
-| Meteo correlation strip | ✔ |
-| Export selected region as CSV | ✔ |
+| Point cloud of all events (Three.js `Points`, one draw call) | ✔ |
+| Colour by time / Z axis / quality, shared 5-stop gradient | ✔ |
+| Time slider with playback animation (`Space`) | ✔ |
+| Trailing time window — All / 25 % / 10 % of the range | ✔ |
+| Quality (`q`) threshold filter | ✔ |
+| Point size control | ✔ |
+| Real DEM terrain layer — glacier ice surface **and** bedrock, with the icequakes in the ice column between them; SRTM relief for the traffic region | ✔ |
+| Seismic station markers on the ice surface | ✔ |
+| Vertical exaggeration control, ×1 = true scale, per-dataset range | ✔ |
+
+### Overview 2 - density / Space-Time Cube
+
+| Feature | Status |
+|---|---|
+| Space-Time Cube: DEM terrain in the bottom 24 % of the cube, time on the vertical axis above it | ✔ |
+| Events coloured by 3-D space-time density (64³ grid, 1-2-1 smoothed) | ✔ |
+| Flat density base for datasets with no terrain (Lorenz) | ✔ |
+| Absolute vs. hour-of-day (cyclic) time axis | ✔ |
+
+### Local view - Event Trail
+
+| Feature | Status |
+|---|---|
+| Rubber-band region selection on the 3D view | ✔ |
+| Event trail — selected events connected in temporal order, first/last marked | ✔ |
+| Event count over time for the selection | ✔ |
+| Z-axis distribution for the selection | ✔ |
+| Quality distribution for the selection | ✔ |
+| Export the selection as CSV | ✔ |
+
+### Shared
+
+| Feature | Status |
+|---|---|
 | Dataset switcher (icequakes / traffic / Lorenz) | ✔ |
-| Multi-dataset coordinate normalization | ✔ |
-| Keyboard shortcuts (Space, R, Esc) | ✔ |
-| Data conversion + generation script | ✔ |
+| Multi-dataset coordinate normalisation from `meta` alone | ✔ |
+| Orbit controls — drag to rotate, scroll to zoom, touch | ✔ |
+| Auto-rotate (hands-off view control) | ✔ |
+| Reset view | ✔ |
+| Colour-coded axis legend, adapting to depth vs. elevation data | ✔ |
+| Meteo correlation strip (icequakes only) | ✔ |
+| Keyboard shortcuts — `Space` play/pause, `R` reset view, `Esc` clear selection | ✔ |
+| Conversion pipeline — 3 scripts (see Project structure) | ✔ |
 | Performance benchmark harness | ✔ |
 
+### Not implemented
+
+Listed so the scope is explicit rather than implied:
+
+| | |
+|---|---|
+| Hover tooltip / per-event picking | ✘ — selection is rubber-band only |
+| Linked highlighting between the 3D view and the local charts | ✘ |
+| Undo/redo, saved views, URL state | ✘ |
+| Level-of-detail or culling for the point cloud | ✘ — all events are uploaded once and drawn every frame |
+| Controlled user study | ✘ — evaluation is a single-analyst walkthrough |
 
 ## Datasets
 

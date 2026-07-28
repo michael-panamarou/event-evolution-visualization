@@ -306,6 +306,74 @@ function stcTimeY(t01) {
 }
 
 // DEM terrain compressed into the bottom slab, coloured by true elevation
+// Base slab for datasets that have no DEM (the Lorenz attractor). The
+// Space-Time Cube needs *something* to stand on, so the terrain is replaced by
+// a flat plane coloured by the 2-D event density in x/y - the vertical
+// (time) half of the technique is identical either way.
+//
+// buildDensityHeatmap() called this function before it existed, so switching
+// to Overview 2 on a DEM-less dataset threw a ReferenceError and left the view
+// blank.
+function buildFlatDensityPlane() {
+  const n = HMAP_GRID;
+  const g = new Float32Array(n * n);
+  const tEndAbs   = T0 + S.tEnd * TSPAN;
+  const tStartAbs = T0 + (S.tEnd - S.winFrac) * TSPAN;
+  for (const e of DS.events) {
+    if (e.t < tStartAbs || e.t > tEndAbs || e.q < S.qualMin) continue;
+    const c = Math.min(n-1, Math.max(0, Math.floor((e.x - X_MIN) / (X_SPAN||1) * n)));
+    const r = Math.min(n-1, Math.max(0, Math.floor((e.y - Y_MIN) / (Y_SPAN||1) * n)));
+    g[r * n + c]++;
+  }
+  // 1-2-1 separable blur, twice - same smoothing as the draped DEM heat field
+  let a = g;
+  for (let pass = 0; pass < 2; pass++) {
+    const b = new Float32Array(n * n);
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++) {
+        const C = a[r*n+c];
+        const l = c > 0 ? a[r*n+c-1] : C, rr = c < n-1 ? a[r*n+c+1] : C;
+        b[r*n+c] = (l + 2*C + rr) * 0.25;
+      }
+    const d = new Float32Array(n * n);
+    for (let c = 0; c < n; c++)
+      for (let r = 0; r < n; r++) {
+        const C = b[r*n+c];
+        const u = r > 0 ? b[(r-1)*n+c] : C, dn = r < n-1 ? b[(r+1)*n+c] : C;
+        d[r*n+c] = (u + 2*C + dn) * 0.25;
+      }
+    a = d;
+  }
+  let mx = 0; for (let i = 0; i < a.length; i++) if (a[i] > mx) mx = a[i];
+
+  const baseY = -SCENE_H/2 + SCENE_H * STC_BASE_FRAC;
+  const geo = new THREE.PlaneGeometry(1, 1, n - 1, n - 1);
+  const pos = geo.attributes.position;
+  const colors = [];
+  for (let row = 0; row < n; row++)
+    for (let col = 0; col < n; col++) {
+      const idx   = row * n + col;
+      const east  = X_MIN + X_SPAN * (col / (n - 1));
+      const north = Y_MIN + Y_SPAN * (row / (n - 1));
+      pos.setXYZ(idx, sceneXFromEast(east), baseY, sceneZFromNorth(north));
+      const t = mx > 0 ? Math.sqrt(a[idx] / mx) : 0;
+      const [r, g2, b] = gradientColor(t);
+      colors.push(r, g2, b);
+    }
+  pos.needsUpdate = true;
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.9, metalness: 0.0,
+    side: THREE.DoubleSide, flatShading: false })));
+  grp.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    color: 0x0d1117, wireframe: true, transparent: true, opacity: 0.10,
+    depthWrite: false })));
+  return grp;
+}
+
 function buildStcBase() {
   const SU = activeSurface();
   const n = SU.n;
@@ -414,7 +482,8 @@ function buildDensityHeatmap() {
       heatmapGroup.add(marks);
     }
   } else {
-    buildFlatDensityPlane();
+    heatmapGroup.add(buildFlatDensityPlane());  // no DEM: flat density base
+    heatmapGroup.add(buildStcPoints());         // same cube above it
   }
   scene.add(heatmapGroup);
   updateHeatmapLegend();
@@ -508,8 +577,9 @@ function setViewMode(mode) {
     buildDensityHeatmap();
     document.getElementById('axis-hint-label').innerHTML =
         axisLegendHTML('colour on the ' +
-            ((DS && DS.meta && DS.meta.domain === 'seismic') ? 'glacier' : 'terrain') +
-            ' surface = event density');
+            ((DS && DS.meta && DS.meta.domain === 'seismic') ? 'glacier surface'
+             : datasetHasSurface() ? 'terrain surface' : 'base plane') +
+            ' = event density');
     document.getElementById('heatmap-note').style.display = 'block';
   }
 }
@@ -1265,9 +1335,12 @@ function loadDataset(name) {
   const surfRow = document.getElementById('surface-row');
   if (surfRow) surfRow.style.display = datasetHasSurface() ? '' : 'none';
   const stcNote = document.getElementById('stc-note-text');
-  if (stcNote) stcNote.innerHTML = (DS.meta.domain === 'seismic')
+  if (stcNote) stcNote.innerHTML =
+      (DS.meta.domain === 'seismic')
       ? 'Space-Time Cube on the glacier DEM: the terrain below is the real ice surface (elevation, true coordinates); above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place. Colour = intensity of activity.'
-      : 'Space-Time Cube on the terrain DEM: the surface below is the real relief (SRTM&nbsp;30&nbsp;m, true coordinates); above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place. Colour = intensity of activity.';
+      : datasetHasSurface()
+      ? 'Space-Time Cube on the terrain DEM: the surface below is the real relief (SRTM&nbsp;30&nbsp;m, true coordinates); above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place. Colour = intensity of activity.'
+      : 'Space-Time Cube on a flat base: this dataset has no terrain, so the plane below is coloured by event density in the horizontal plane; above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place.';
   const cap = document.getElementById('surf-caption');
   if (cap) cap.innerHTML = (DS.meta.domain === 'seismic')
       ? 'Real Rh&ocirc;ne Glacier DEM: ice surface and bedrock, with the icequakes in the ice column between them.'

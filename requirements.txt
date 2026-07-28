@@ -1,0 +1,8 @@
+# Pipeline dependencies (Python 3.9+)
+#   convert_data.py               numpy, pandas, scipy
+#   convert_traffic_stats19.py    numpy, pandas
+#   fetch_elevation.py            pandas, requests
+numpy
+pandas
+scipy
+requests
