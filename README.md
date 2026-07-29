@@ -186,7 +186,7 @@ The visualization reads all axis labels and display strings from `meta` at
 runtime, so switching datasets requires no changes to rendering code.
 
 
-## What's implemented (Prototype v2)
+## What's implemented
 
 Grouped by the three techniques the thesis defines: two overviews and one local
 view. Everything below was checked against the code, not just the changelog.
