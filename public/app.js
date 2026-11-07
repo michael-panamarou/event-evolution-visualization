@@ -28,6 +28,8 @@ let X_MIN, X_MAX, X_SPAN;
 let Y_MIN, Y_MAX, Y_SPAN;
 let Z_MIN, Z_MAX, Z_SPAN;
 let tNorm, qArr;   // Float32Array, length N
+let qRank;         // percentile rank of each event's quality, 0-1
+let Q_MIN, Q_MAX, Q_MED;   // actual quality values, for the legend
 
 const SCENE_W = 600;   // scene units for X & Z
 const SCENE_H = 484;   // scene units for Y (depth or time)
@@ -218,7 +220,7 @@ function rebuildPointCloud() {
     let t;
     if      (S.colorBy === 'time')  t = tNorm[i];
     else if (S.colorBy === 'depth') t = Z_SPAN > 0.001 ? (e.z - Z_MIN) / Z_SPAN : 0.5;
-    else                            t = qArr[i];
+    else                            t = qRank[i];   // percentile, not the raw value
 
     const [r, g, b] = gradientColor(t);
 
@@ -284,6 +286,64 @@ let heatmapGroup = null;
 const STC_BASE_FRAC = 0.24;    // fraction of cube height used by the terrain
 const STC_DGRID     = 26;      // density grid (east x north x time)
 
+// --- cached cube layers ----------------------------------------------------
+// Moving the time slider changes *which events are shown*. It does not change
+// the terrain, and it must not change the colour of an event that stays
+// visible. Both used to be rebuilt on every slider tick: the terrain because
+// the window handler called the full cube build, and the colours because the
+// density field was binned over the windowed events only, so its maximum - the
+// value everything is normalised against - moved with the slider.
+//
+// The terrain and the density field are therefore built once per dataset and
+// filter setting and cached here; a window change rebuilds only the event
+// layer.
+let stcBaseGroup = null, stcBaseKey = '';   // terrain / flat base + stations
+let stcPoints    = null;                    // the event layer of the cube
+let stcDens      = null, stcDensKey = '';   // density field + its maximum
+
+function dsKey() { return (DS && DS.meta && DS.meta.name) || '-'; }
+
+// Frees the GPU buffers of a subtree before it is dropped.
+function disposeObject(obj) {
+  if (!obj) return;
+  obj.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) (Array.isArray(o.material) ? o.material : [o.material])
+        .forEach(m => m.dispose());
+  });
+}
+
+// Invalidate everything the cube caches - called when the dataset changes.
+function invalidateStcCache() {
+  disposeObject(stcBaseGroup); stcBaseGroup = null; stcBaseKey = '';
+  disposeObject(stcPoints);    stcPoints    = null;
+  stcDens = null; stcDensKey = '';
+}
+
+// The base of the cube: real terrain where there is a DEM, otherwise a flat
+// plane coloured by horizontal event density. Neither depends on the time
+// window, so the group is built once and re-attached on later builds.
+function getStcBase() {
+  const key = dsKey() + '|' + (datasetHasSurface() ? 'dem' : 'flat:' + S.qualMin);
+  if (stcBaseGroup && stcBaseKey === key) return stcBaseGroup;
+
+  disposeObject(stcBaseGroup);
+  const g = new THREE.Group();
+  if (datasetHasSurface()) {
+    g.add(buildStcBase());                // DEM terrain at the bottom
+    const marks = buildStationMarkers();  // stations, dropped onto the base
+    if (marks) {
+      marks.children.forEach(c => { c.position.y = stcBaseY(activeSurface().z_max); });
+      g.add(marks);
+    }
+  } else {
+    g.add(buildFlatDensityPlane());       // no DEM: flat density base
+  }
+  stcBaseGroup = g;
+  stcBaseKey   = key;
+  return g;
+}
+
 // vertical position of the DEM inside the bottom slab
 function stcBaseY(z) {
   const SU = activeSurface(), BD = activeBedrock();
@@ -319,10 +379,10 @@ function stcTimeY(t01) {
 function buildFlatDensityPlane() {
   const n = HMAP_GRID;
   const g = new Float32Array(n * n);
-  const tEndAbs   = T0 + S.tEnd * TSPAN;
-  const tStartAbs = T0 + (S.tEnd - S.winFrac) * TSPAN;
+  // Over the whole dataset, not the current window: this plane is the
+  // counterpart of the terrain, and terrain does not move with the slider.
   for (const e of DS.events) {
-    if (e.t < tStartAbs || e.t > tEndAbs || e.q < S.qualMin) continue;
+    if (e.q < S.qualMin) continue;
     const c = Math.min(n-1, Math.max(0, Math.floor((e.x - X_MIN) / (X_SPAN||1) * n)));
     const r = Math.min(n-1, Math.max(0, Math.floor((e.y - Y_MIN) / (Y_SPAN||1) * n)));
     g[r * n + c]++;
@@ -414,13 +474,18 @@ function buildStcBase() {
 // Space-time density: events binned in (east, north, time), lightly smoothed,
 // so each event can be coloured by how intense activity is around it.
 function stcDensity() {
+  // The field is a property of the dataset, not of the current time window.
+  // Binning only the windowed events would leave the values of the visible
+  // events almost unchanged but move the maximum they are normalised against,
+  // so the same event would change colour as the slider moves.
+  const key = dsKey() + '|' + S.timeMode + '|' + S.qualMin;
+  if (stcDens && stcDensKey === key) return stcDens;
+
   const n = STC_DGRID;
   const cnt = new Float32Array(n * n * n);
   const idx = (i, j, k) => i + n * (j + n * k);
-  const tEndAbs   = T0 + S.tEnd * TSPAN;
-  const tStartAbs = T0 + (S.tEnd - S.winFrac) * TSPAN;
   for (const e of DS.events) {
-    if (e.t < tStartAbs || e.t > tEndAbs || e.q < S.qualMin) continue;
+    if (e.q < S.qualMin) continue;
     const i = Math.min(n-1, Math.max(0, Math.floor((e.x - X_MIN) / (X_SPAN||1) * n)));
     const j = Math.min(n-1, Math.max(0, Math.floor((e.y - Y_MIN) / (Y_SPAN||1) * n)));
     const k = Math.min(n-1, Math.max(0, Math.floor(eventT01(e) * n)));
@@ -442,7 +507,9 @@ function stcDensity() {
     a = b;
   }
   let mx = 0; for (let p = 0; p < a.length; p++) if (a[p] > mx) mx = a[p];
-  return { n, dens: a, max: mx, idx };
+  stcDens    = { n, dens: a, max: mx, idx };
+  stcDensKey = key;
+  return stcDens;
 }
 
 // The events themselves, lifted onto the time axis and coloured by intensity
@@ -474,19 +541,9 @@ function buildStcPoints() {
 function buildDensityHeatmap() {
   destroyHeatmap();
   heatmapGroup = new THREE.Group();
-
-  if (datasetHasSurface()) {
-    heatmapGroup.add(buildStcBase());     // DEM terrain at the bottom
-    heatmapGroup.add(buildStcPoints());   // space-time cube above it
-    const marks = buildStationMarkers();  // stations, dropped onto the base
-    if (marks) {
-      marks.children.forEach(c => { c.position.y = stcBaseY(activeSurface().z_max); });
-      heatmapGroup.add(marks);
-    }
-  } else {
-    heatmapGroup.add(buildFlatDensityPlane());  // no DEM: flat density base
-    heatmapGroup.add(buildStcPoints());         // same cube above it
-  }
+  heatmapGroup.add(getStcBase());        // cached terrain / flat base
+  stcPoints = buildStcPoints();          // space-time cube above it
+  heatmapGroup.add(stcPoints);
   scene.add(heatmapGroup);
   updateHeatmapLegend();
 }
@@ -500,12 +557,27 @@ function updateHeatmapLegend() {
 }
 
 function destroyHeatmap() {
-  if (heatmapGroup) { scene.remove(heatmapGroup); heatmapGroup = null; }
+  if (!heatmapGroup) return;
+  scene.remove(heatmapGroup);
+  // the base is cached and reused, so it is only detached, never disposed
+  if (stcBaseGroup && stcBaseGroup.parent === heatmapGroup)
+    heatmapGroup.remove(stcBaseGroup);
+  disposeObject(stcPoints);
+  stcPoints    = null;
+  heatmapGroup = null;
 }
 
-// The drape depends on the time window, so a window change rebuilds it.
+// A time-window change affects only which events are drawn, so only the event
+// layer is rebuilt. The terrain and the density field are reused.
 function updateHeatmapWindow() {
-  if (S.viewMode === 'heatmap') buildDensityHeatmap();
+  if (S.viewMode !== 'heatmap') return;
+  if (!heatmapGroup) { buildDensityHeatmap(); return; }
+  if (stcPoints) {
+    heatmapGroup.remove(stcPoints);
+    disposeObject(stcPoints);
+  }
+  stcPoints = buildStcPoints();
+  heatmapGroup.add(stcPoints);
 }
 
 
@@ -580,7 +652,7 @@ function setViewMode(mode) {
     document.getElementById('axis-hint-label').innerHTML =
         axisLegendHTML('colour on the ' +
             ((DS && DS.meta && DS.meta.domain === 'seismic') ? 'glacier surface'
-             : datasetHasSurface() ? 'terrain surface' : 'base plane') +
+                : datasetHasSurface() ? 'terrain surface' : 'base plane') +
             ' = event density');
     document.getElementById('heatmap-note').style.display = 'block';
   }
@@ -677,6 +749,13 @@ function buildDemMesh(opts) {
   const colorBy = (opts && opts.colorBy) || 'elevation';
   const opaque  = !!(opts && opts.opaque);
   const SRC     = (opts && opts.src) || activeSurface();
+  // Per-node ice thickness in metres, and the threshold below which the sheet
+  // is cut away entirely (see the mask further down).
+  const thick   = (opts && opts.thickness) || null;
+  const maskMin = (opts && opts.maskMin != null) ? opts.maskMin : null;
+  // The triangulation overlay is useful on a coarse grid and is pure noise on
+  // a fine one - 200 x 200 draws 80 000 edges over the data.
+  const wire    = (opts && opts.wire !== undefined) ? opts.wire : true;
 
   const n = SRC.n;
   const { x_min, x_max, y_min, y_max } = SRC;
@@ -711,6 +790,14 @@ function buildDemMesh(opts) {
         colors.push(fc[0] * (0.72 + 0.42 * hs), fc[1] * (0.72 + 0.42 * hs), fc[2] * (0.72 + 0.42 * hs));
         continue;
       }
+      if (colorBy === 'ice') {
+        // Glacier ice: near-white at the thin margins, deepening to glacier
+        // blue where the ice is thick, so the tongue reads as a body of ice
+        // with a shape rather than a uniform blue sheet.
+        const d = Math.min(1, (thick ? thick[idx] : 150) / 220);
+        colors.push(0.80 - 0.34 * d, 0.91 - 0.16 * d, 0.97 - 0.03 * d);
+        continue;
+      }
       if (colorBy === 'density') {
         t = dens.max > 0 ? Math.sqrt(dens.grid[row * n + col] / dens.max) : 0;
       } else {
@@ -722,6 +809,20 @@ function buildDemMesh(opts) {
   }
   pos.needsUpdate = true;
   geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+  // Drop every triangle that has no ice under it. The Rhone DEM covers the
+  // whole valley, but only 83% of the event footprint is glaciated (median
+  // thickness 126 m, the rest bare rock), so an unmasked sheet draws a dome of
+  // "ice" over the rock walls too and the glacier loses its shape.
+  if (maskMin != null && thick && geo.index) {
+    const src = geo.index.array, keep = [];
+    for (let i = 0; i < src.length; i += 3) {
+      const a = src[i], b = src[i + 1], c = src[i + 2];
+      if (thick[a] > maskMin && thick[b] > maskMin && thick[c] > maskMin)
+        keep.push(a, b, c);
+    }
+    geo.setIndex(keep);
+  }
   geo.computeVertexNormals();
 
   const group = new THREE.Group();
@@ -735,9 +836,11 @@ function buildDemMesh(opts) {
   group.add(new THREE.Mesh(geo, topMat));
 
   // faint triangulation, as in the reference DEM figure
-  group.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-    color: 0x0d1117, wireframe: true, transparent: true,
-    opacity: opaque ? 0.18 : 0.07, depthWrite: false })));
+  if (wire) {
+    group.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: 0x0d1117, wireframe: true, transparent: true,
+      opacity: opaque ? 0.18 : 0.07, depthWrite: false })));
+  }
 
   // Solid side walls + base, so the DEM reads as a block of terrain rather
   // than a floating sheet. Only in the opaque (heatmap) view, otherwise the
@@ -764,18 +867,46 @@ function buildDemMesh(opts) {
   return group;
 }
 
-// Seismic stations as white triangular markers
+// Seismic stations as white triangular markers.
+//
+// These were 4-sided cones. A cone pointing down is a pyramid, and the camera
+// normally looks at the glacier from above, so what the viewer actually saw was
+// the pyramid's square base - fourteen white rectangles floating over the ice.
+// The reference figures use a flat "v" marker that always faces the reader, so
+// the marker is drawn as a sprite instead: it keeps its triangular silhouette
+// from every angle and holds a constant on-screen size.
+let _stationSprite = null;
+function stationSpriteTexture() {
+  if (_stationSprite) return _stationSprite;
+  const S0 = 128, cv = document.createElement('canvas');
+  cv.width = cv.height = S0;
+  const c = cv.getContext('2d');
+  c.beginPath();
+  c.moveTo(S0 * 0.08, S0 * 0.18);
+  c.lineTo(S0 * 0.92, S0 * 0.18);
+  c.lineTo(S0 * 0.50, S0 * 0.88);
+  c.closePath();
+  c.fillStyle = '#ffffff';
+  c.fill();
+  c.lineWidth = S0 * 0.07;
+  c.strokeStyle = '#11161f';
+  c.stroke();
+  _stationSprite = new THREE.CanvasTexture(cv);
+  return _stationSprite;
+}
+
 function buildStationMarkers() {
   if (typeof STATIONS === 'undefined' || !STATIONS || !Z_FLIP) return null;
   const g = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6,
-    metalness: 0.0, flatShading: true });
+  const tex = stationSpriteTexture();
   for (const st of STATIONS) {
     if (st.east === undefined) continue;
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(7, 14, 4), mat);
-    cone.position.set(sceneXFromEast(st.east), sceneYFromZ(st.z), sceneZFromNorth(st.north));
-    cone.rotation.x = Math.PI;                 // point downward, like the figures
-    g.add(cone);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, depthWrite: false, depthTest: false }));
+    sp.position.set(sceneXFromEast(st.east), sceneYFromZ(st.z), sceneZFromNorth(st.north));
+    sp.scale.set(16, 16, 1);
+    sp.renderOrder = 4;                       // above the ice sheet
+    g.add(sp);
   }
   return g;
 }
@@ -788,28 +919,55 @@ function buildGlacierSurface() {
   if (!SURF) return;
   surfaceMesh = new THREE.Group();
 
-  // bedrock: solid, muted rock tone (glacier only)
   const BED = activeBedrock();
+  const isGlacier = DS && DS.meta && DS.meta.domain === 'seismic';
+
+  // Ice thickness per DEM node, in metres. Both layers store z = -elevation,
+  // so thickness = BED.z - SURF.z. It drives the ice tint and the mask.
+  let thick = null;
+  if (isGlacier && BED && BED.n === SURF.n && BED.z.length === SURF.z.length) {
+    thick = new Float32Array(SURF.z.length);
+    for (let i = 0; i < thick.length; i++) thick[i] = BED.z[i] - SURF.z[i];
+  }
+
+  // Both DEM layers are *context*: they must never write depth. Previously the
+  // bedrock did, and because it is a bowl drawn DoubleSide, its far wall sat in
+  // the depth buffer in front of the ice column - every event inside the
+  // glacier was depth-rejected and the view showed an empty grey basin.
+  // Context geometry is now composited by explicit render order instead:
+  //   bedrock (1) -> events (2) -> ice (3)
+  // so the cloud is seen lying on the rock and viewed *through* the ice, which
+  // is how the reference figures read. Events still depth-test against each
+  // other, so the shape of the cloud itself survives.
   if (BED) {
+    // Darker and more translucent than the ice: the bowl has to read as rock
+    // and still be seen through, because from a low angle its near wall stands
+    // between the camera and the whole event cloud.
     const bed = buildDemMesh({ src: BED, colorBy: 'flat',
-      flatColor: [0.42, 0.40, 0.38], opaque: false });
+      flatColor: [0.34, 0.30, 0.27], opaque: false, wire: false });
     bed.children.forEach(m => {
-      if (m.material.opacity !== undefined) m.material.opacity = 0.92;
-      m.material.depthWrite = true;
+      if (m.material.opacity !== undefined) m.material.opacity = isGlacier ? 0.62 : 0.92;
+      m.material.depthWrite = false;
+      m.renderOrder = 1;
     });
     surfaceMesh.add(bed);
   }
-  // glacier surface: translucent ice
-  const isGlacier = DS && DS.meta && DS.meta.domain === 'seismic';
+
+  // glacier surface: translucent ice, cut away where there is none
   const ice = buildDemMesh({ src: SURF,
-    colorBy: isGlacier ? 'flat' : 'elevation',
-    flatColor: [0.72, 0.85, 0.95], opaque: false });
+    colorBy: isGlacier ? 'ice' : 'elevation',
+    thickness: thick,
+    maskMin: isGlacier ? 5 : null,
+    flatColor: [0.72, 0.85, 0.95], opaque: false, wire: false });
   // The events of a surface-bound dataset (road collisions) lie ON the terrain,
   // not inside a volume like the icequakes, so the sheet must stay translucent
   // enough for the point cloud underneath it to remain readable. At 0.75 the
   // 4 349 collisions were completely invisible whenever the surface was shown.
   ice.children.forEach(m => {
-    if (m.material.opacity !== undefined) m.material.opacity = isGlacier ? 0.34 : 0.35; });
+    if (m.material.opacity !== undefined) m.material.opacity = isGlacier ? 0.26 : 0.35;
+    m.material.depthWrite = false;
+    m.renderOrder = 3;
+  });
   surfaceMesh.add(ice);
 
   const marks = buildStationMarkers();
@@ -830,7 +988,9 @@ function syncPointDepth() {
   if (!pointCloud) return;
   const onTop = S.showSurface && !(DS && DS.meta && DS.meta.domain === 'seismic');
   pointCloud.material.depthTest = !onTop;
-  pointCloud.renderOrder = onTop ? 10 : 0;
+  // 2 = between the bedrock (1) and the ice (3), so the cloud sits in the ice
+  // column; 10 = above everything, for events that lie on a terrain surface.
+  pointCloud.renderOrder = onTop ? 10 : 2;
   pointCloud.material.needsUpdate = true;
 }
 
@@ -1336,6 +1496,34 @@ function loadDataset(name) {
     qArr[i]  = DS.events[i].q;
   }
 
+  // Quality is strongly right-skewed: seismic semblance runs 0.05-0.78 but its
+  // median is 0.09, so a linear ramp puts 95% of the events in the first
+  // quarter of the colour scale and the view reads as one flat colour. qRank
+  // is the empirical percentile of each event, which spreads the events evenly
+  // over the ramp (histogram equalisation). The legend reports the real values
+  // at both ends so a colour can still be read back as a number.
+  // Ties take the mean rank of their run. Without that, a discrete attribute
+  // would be spread across the whole ramp by sort order alone - the three
+  // STATS19 severities would come out as a smooth gradient of thousands of
+  // shades instead of three colours.
+  qRank = new Float32Array(N);
+  {
+    const order = Array.from({ length: N }, (_, i) => i)
+        .sort((a, b) => qArr[a] - qArr[b]);
+    const denom = N > 1 ? N - 1 : 1;
+    let i = 0;
+    while (i < N) {
+      let j = i;
+      while (j + 1 < N && qArr[order[j + 1]] === qArr[order[i]]) j++;
+      const mid = (i + j) / 2 / denom;
+      for (let k = i; k <= j; k++) qRank[order[k]] = N > 1 ? mid : 0.5;
+      i = j + 1;
+    }
+    Q_MIN = N ? qArr[order[0]] : 0;
+    Q_MAX = N ? qArr[order[N - 1]] : 1;
+    Q_MED = N ? qArr[order[Math.floor(N / 2)]] : 0;
+  }
+
   // Reset state
   Object.assign(S, { tEnd:1, winFrac:1, qualMin:0.05, colorBy:'time',
     playing:false, autoRot:false, mode:'orbit', selIdx:[],
@@ -1345,7 +1533,7 @@ function loadDataset(name) {
   // events packed into a 1.2 km glacier tongue.
   S.pointSz = (m.domain === 'seismic') ? 2.0 : 3.5;
   const szSlider = document.getElementById('sz-slider') ||
-                   document.querySelector('input[oninput^="setSize"]');
+      document.querySelector('input[oninput^="setSize"]');
   if (szSlider) szSlider.value = S.pointSz;
   const szVal = document.getElementById('sz-val');
   if (szVal) szVal.textContent = S.pointSz.toFixed(1);
@@ -1384,10 +1572,10 @@ function loadDataset(name) {
   const stcNote = document.getElementById('stc-note-text');
   if (stcNote) stcNote.innerHTML =
       (DS.meta.domain === 'seismic')
-      ? 'Space-Time Cube on the glacier DEM: the terrain below is the real ice surface (elevation, true coordinates); above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place. Colour = intensity of activity.'
-      : datasetHasSurface()
-      ? 'Space-Time Cube on the terrain DEM: the surface below is the real relief (SRTM&nbsp;30&nbsp;m, true coordinates); above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place. Colour = intensity of activity.'
-      : 'Space-Time Cube on a flat base: this dataset has no terrain, so the plane below is coloured by event density in the horizontal plane; above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place.';
+          ? 'Space-Time Cube on the glacier DEM: the terrain below is the real ice surface (elevation, true coordinates); above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place. Colour = intensity of activity.'
+          : datasetHasSurface()
+              ? 'Space-Time Cube on the terrain DEM: the surface below is the real relief (SRTM&nbsp;30&nbsp;m, true coordinates); above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place. Colour = intensity of activity.'
+              : 'Space-Time Cube on a flat base: this dataset has no terrain, so the plane below is coloured by event density in the horizontal plane; above it the vertical axis is <b>time</b>, so a column shows when events occurred at that place.';
   const cap = document.getElementById('surf-caption');
   if (cap) cap.innerHTML = (DS.meta.domain === 'seismic')
       ? 'Real Rh&ocirc;ne Glacier DEM: ice surface and bedrock, with the icequakes in the ice column between them.'
@@ -1400,6 +1588,7 @@ function loadDataset(name) {
 
   // Rebuild
   destroyHeatmap();
+  invalidateStcCache();    // terrain and density field belong to one dataset
   clearTrail();
   clearSelection();
   rebuildPointCloud();
@@ -1415,11 +1604,31 @@ function setColor(mode) {
   );
 
   const bar = 'linear-gradient(to right,#3b82f6,#06b6d4,#10b981,#eab308,#ef4444)';
+
+  // Numeric end labels, so a colour can be read back as a value rather than
+  // only as "more" or "less".
+  const fmtDate = ts => DS && DS.meta && DS.meta.domain !== 'orbital'
+      ? new Date(ts * 1000).toISOString().slice(0, 10)
+      : 't=' + (+ts).toFixed(0);
+  const elevLo = displayElev(Z_MIN), elevHi = displayElev(Z_MAX);
+  const zAxis  = (DS && DS.meta && DS.meta.axes && DS.meta.axes.z) || 'Z';
+  // Only the two geographic datasets carry metres; the attractor's Z is a bare
+  // state variable and must not be labelled with a unit.
+  const zUnit  = /\(m\)|\[m/.test(zAxis) ? ' m' : '';
+  const qLabel = (DS && DS.meta && DS.meta.q_label) || 'Quality';
+
   const legends = {
-    time:  { min: 'Early',   max: 'Late', bar },
-    depth: { min: 'Shallow', max: 'Deep', bar },
-    qual:  { min: 'Low',     max: 'High', bar },
+    time:  { min: fmtDate(T0), max: fmtDate(T1), bar,
+             note: 'colour = time of the event' },
+    depth: { min: Math.round(Math.min(elevLo, elevHi)) + zUnit,
+             max: Math.round(Math.max(elevLo, elevHi)) + zUnit, bar,
+             note: 'colour = ' + zAxis },
+    qual:  { min: (+Q_MIN).toFixed(2), max: (+Q_MAX).toFixed(2), bar,
+             note: qLabel + ' percentile — median ' + (+Q_MED).toFixed(2) },
   };
+
+  const noteEl = document.getElementById('legend-note');
+  if (noteEl) noteEl.textContent = legends[mode].note;
 
   document.getElementById('legend-bar').style.background = legends[mode].bar;
   document.getElementById('leg-min').textContent = legends[mode].min;
